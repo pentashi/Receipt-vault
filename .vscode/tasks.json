@@ -1,0 +1,50 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Start Flask Backend",
+			"type": "shell",
+			"command": "python -m flask run --app backend/app.py --debug",
+			"args": [],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Start React Frontend",
+			"type": "shell",
+			"command": "npm run dev --prefix frontend",
+			"args": [],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Start Flask Backend",
+			"type": "shell",
+			"command": "\"C:/Users/aaa/New folder/.venv/Scripts/python.exe\" -m flask run --app backend/app.py --debug",
+			"args": [],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Start Flask Backend (venv)",
+			"type": "shell",
+			"command": "\"C:/Users/aaa/New folder/.venv/Scripts/python.exe\" -m flask run --app backend/app.py --debug",
+			"args": [],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Start Flask Backend (venv, quoted path)",
+			"type": "shell",
+			"command": "& 'C:/Users/aaa/New folder/.venv/Scripts/python.exe' -m flask run --app backend/app.py --debug",
+			"args": [],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		}
+	]
+}
