@@ -24,7 +24,7 @@ export default function BudgetManager() {
       const percentageUsed = budget.percentage_used || 0;
       const isWarning = percentageUsed >= budget.alert_threshold && !budget.is_exceeded;
       if (isWarning && !shownWarnings[budget.id]) {
-        toast((t) => (
+        toast(() => (
           <span>
             <AlertTriangle className="inline w-5 h-5 text-yellow-600 mr-2" />
             <b>Warning:</b> Approaching limit for <b>{budget.category}</b>

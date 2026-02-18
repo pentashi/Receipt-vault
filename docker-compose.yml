@@ -1,0 +1,45 @@
+version: '3.9'
+
+services:
+  db:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_DB: receiptvault
+      POSTGRES_USER: receiptvault
+      POSTGRES_PASSWORD: receiptvaultpass
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks:
+      - receiptvault-net
+
+  backend:
+    build: ./backend
+    restart: always
+    environment:
+      FLASK_ENV: production
+      DATABASE_URL: postgresql://receiptvault:receiptvaultpass@db:5432/receiptvault
+      # Add other environment variables as needed
+    depends_on:
+      - db
+    networks:
+      - receiptvault-net
+    ports:
+      - "5000:5000"
+
+  frontend:
+    build: ./frontend
+    restart: always
+    depends_on:
+      - backend
+    networks:
+      - receiptvault-net
+    ports:
+      - "80:80"
+
+volumes:
+  db_data:
+
+networks:
+  receiptvault-net:
+    driver: bridge

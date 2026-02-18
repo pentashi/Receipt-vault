@@ -3,7 +3,7 @@ import Dashboard from './components/Dashboard'
 import ReceiptUpload from './components/ReceiptUpload'
 import ReceiptList from './components/ReceiptList'
 import BudgetManager from './components/BudgetManager'
-import { Menu, Upload, Receipt, PieChart, TrendingUp, Bell } from 'lucide-react'
+import { Upload, Receipt, PieChart, TrendingUp, Bell } from 'lucide-react'
 import { getBudgetAlerts } from './services/api'
 
 type TabType = 'dashboard' | 'upload' | 'receipts' | 'budgets'

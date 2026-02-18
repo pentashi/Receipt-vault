@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import ConfirmDialog from './ConfirmDialog';
-import { Search, Calendar, Store, Trash2, Edit, Eye, Download } from 'lucide-react';
+import { Store, Trash2, Edit, Eye, Download } from 'lucide-react';
 import { getReceipts, deleteReceipt, getCategories, updateReceipt } from '../services/api';
 
 
@@ -75,7 +75,7 @@ export default function ReceiptList() {
       r.total_incl_vat,
       r.vat_amount,
       r.payment_method || '',
-      r.items && r.items.length > 0 ? r.items.map(i => `${i.name} (${i.price})`).join('; ') : ''
+      r.items && r.items.length > 0 ? r.items.map((i: any) => `${i.name} (${i.price})`).join('; ') : ''
     ]);
     const csvContent = [headers, ...rows]
       .map(e => e.map(x => `"${String(x).replace(/"/g, '""')}"`).join(','))
@@ -497,7 +497,7 @@ export default function ReceiptList() {
         ) : (
           <div className="divide-y">
             <div style={{background: 'yellow', color: 'black', fontWeight: 'bold', padding: '8px', textAlign: 'center'}}>RECEIPT LIST RENDERED ({receipts.length})</div>
-            {receipts.map(receipt => (
+            {receipts.map((receipt: any) => (
               <div key={receipt.receipt_id} className="p-6 hover:bg-gray-50 transition-colors">
                 <div className="flex items-start justify-between">
                   <div className="flex-1">

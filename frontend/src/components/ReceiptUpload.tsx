@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Upload, CheckCircle, AlertCircle } from 'lucide-react'
 import { uploadReceipt } from '../services/api'
-import toast from 'react-hot-toast'
+// import toast from 'react-hot-toast'
 
 interface ReceiptUploadProps {
   onUploadSuccess: () => void

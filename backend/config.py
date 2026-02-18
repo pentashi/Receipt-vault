@@ -6,7 +6,10 @@ load_dotenv()
 class Config:
     """Application configuration"""
     SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
+    # Use DATABASE_URL from environment (set by Docker Compose), fallback to SQLite for local/dev
     SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL', 'sqlite:///cemac.db')
+    # Example for Docker Compose:
+    # DATABASE_URL=postgresql://receiptvault:receiptvaultpass@db:5432/receiptvault
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     
     # CORS settings
