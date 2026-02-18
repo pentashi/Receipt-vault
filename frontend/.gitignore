@@ -7,7 +7,7 @@ dist/
 build/
 
 # Environment variables
-.env
+# .env is needed for Docker build context
 .env.local
 .env.production
 
