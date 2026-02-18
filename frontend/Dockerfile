@@ -1,4 +1,5 @@
 # Use official Node image for build
+
 FROM node:20-alpine as build
 
 WORKDIR /app
@@ -6,6 +7,11 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm install
 COPY . .
+
+# Inject VITE_API_URL from build arg
+ARG VITE_API_URL
+RUN echo "VITE_API_URL=$VITE_API_URL" > .env
+
 RUN npm run build
 
 # Use nginx to serve the build
