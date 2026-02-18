@@ -583,7 +583,7 @@ export default function ReceiptList() {
                 <div className="mb-6">
                   <p className="text-sm text-gray-600 mb-2">Receipt Image</p>
                   <img 
-                    src={`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/uploads/${selectedReceipt.image_path.split('/').pop()}`}
+                    src={`${import.meta.env.VITE_API_URL}/uploads/${selectedReceipt.image_path.split('/').pop()}`}
                     alt="Receipt"
                     className="max-w-full h-auto border rounded-lg shadow-sm"
                     onError={(e) => {
