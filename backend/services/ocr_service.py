@@ -23,6 +23,13 @@ class OCRService:
         # Enhance sharpness
         enhancer = ImageEnhance.Sharpness(image)
         image = enhancer.enhance(1.5)
+
+        # Resize image if too large (max width 1200px)
+        max_width = 1200
+        if image.width > max_width:
+            ratio = max_width / image.width
+            new_height = int(image.height * ratio)
+            image = image.resize((max_width, new_height), Image.ANTIALIAS)
         
         return image
     
@@ -30,15 +37,15 @@ class OCRService:
         """Extract raw text from image using OCR"""
         try:
             image = Image.open(image_path)
-            
-            # Preprocess image for better OCR
+            # Preprocess image for better OCR and resize
             image = self._preprocess_image(image)
-            
-            # Use PSM 6 (Assume a single uniform block of text)
-            text = pytesseract.image_to_string(image, lang='eng+ara', config='--psm 6')
+            # Use only English for OCR to reduce memory
+            text = pytesseract.image_to_string(image, lang='eng', config='--psm 6')
             return text
+        except MemoryError:
+            return "OCR failed: Out of memory. Try a smaller image."
         except Exception as e:
-            raise Exception(f"OCR extraction failed: {str(e)}")
+            return f"OCR extraction failed: {str(e)}"
     
     def parse_receipt(self, image_path):
         """Parse receipt image and extract structured data"""
