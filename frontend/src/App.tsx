@@ -10,6 +10,7 @@ type TabType = 'dashboard' | 'upload' | 'receipts' | 'budgets'
 import { Toaster } from 'react-hot-toast'
 
 function App() {
+    const [navOpen, setNavOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<TabType>('dashboard')
   const [alerts, setAlerts] = useState<any[]>([])
   const [showAlerts, setShowAlerts] = useState(false)
@@ -48,7 +49,8 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="min-h-screen bg-gray-100 w-full">
+      <div className="w-full max-w-screen-lg mx-auto px-2">
       <Toaster position="top-right" toastOptions={{ duration: 4000 }} />
       {/* Header */}
       <header className="bg-primary-600 text-white shadow-lg">
@@ -59,7 +61,6 @@ function App() {
               <h1 className="text-2xl font-bold">ReceiptVault</h1>
             </div>
             <div className="flex items-center space-x-4">
-              <p className="text-sm text-primary-100">Smart Expense Tracking</p>
               
               {/* Notification Bell */}
               <div className="relative alerts-dropdown">
@@ -148,8 +149,9 @@ function App() {
 
       {/* Navigation */}
       <nav className="bg-white shadow-sm border-b">
-        <div className="container mx-auto px-4">
-          <div className="flex space-x-1">
+        <div className="w-full">
+          {/* Desktop Tabs */}
+          <div className="hidden sm:flex space-x-1">
             <button
               onClick={() => setActiveTab('dashboard')}
               className={`flex items-center space-x-2 px-6 py-4 font-medium transition-colors ${
@@ -161,7 +163,6 @@ function App() {
               <TrendingUp className="w-5 h-5" />
               <span>Dashboard</span>
             </button>
-            
             <button
               onClick={() => setActiveTab('upload')}
               className={`flex items-center space-x-2 px-6 py-4 font-medium transition-colors ${
@@ -173,7 +174,6 @@ function App() {
               <Upload className="w-5 h-5" />
               <span>Upload Receipt</span>
             </button>
-            
             <button
               onClick={() => setActiveTab('receipts')}
               className={`flex items-center space-x-2 px-6 py-4 font-medium transition-colors ${
@@ -185,7 +185,6 @@ function App() {
               <Receipt className="w-5 h-5" />
               <span>My Receipts</span>
             </button>
-            
             <button
               onClick={() => setActiveTab('budgets')}
               className={`flex items-center space-x-2 px-6 py-4 font-medium transition-colors ${
@@ -198,11 +197,64 @@ function App() {
               <span>Budgets</span>
             </button>
           </div>
+          {/* Mobile: Only Dashboard visible, hamburger for others */}
+          <div className="flex sm:hidden items-center justify-between">
+            <button
+              onClick={() => setActiveTab('dashboard')}
+              className={`flex items-center space-x-2 px-4 py-4 font-medium transition-colors ${activeTab === 'dashboard' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-600 hover:text-primary-600'}`}
+            >
+              <TrendingUp className="w-5 h-5" />
+              <span>Dashboard</span>
+            </button>
+            <button
+              className="p-2 rounded-lg hover:bg-gray-200 focus:outline-none border border-gray-300"
+              onClick={() => setNavOpen(!navOpen)}
+              aria-label={navOpen ? 'Close navigation menu' : 'Open navigation menu'}
+            >
+              {navOpen ? (
+                <svg className="w-7 h-7" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" stroke="#222" />
+                </svg>
+              ) : (
+                <svg className="w-7 h-7" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" stroke="#222" />
+                </svg>
+              )}
+            </button>
+          </div>
+          {/* Mobile Hamburger Dropdown for other tabs */}
+          {navOpen && (
+            <div className="sm:hidden absolute left-0 right-0 bg-white border-b z-40">
+              <div className="flex flex-col">
+                <button
+                  onClick={() => { setActiveTab('upload'); setNavOpen(false); }}
+                  className={`flex items-center space-x-2 px-6 py-4 font-medium transition-colors ${activeTab === 'upload' ? 'text-primary-600 bg-primary-100' : 'text-gray-600 hover:text-primary-600'}`}
+                >
+                  <Upload className="w-5 h-5" />
+                  <span>Upload Receipt</span>
+                </button>
+                <button
+                  onClick={() => { setActiveTab('receipts'); setNavOpen(false); }}
+                  className={`flex items-center space-x-2 px-6 py-4 font-medium transition-colors ${activeTab === 'receipts' ? 'text-primary-600 bg-primary-100' : 'text-gray-600 hover:text-primary-600'}`}
+                >
+                  <Receipt className="w-5 h-5" />
+                  <span>My Receipts</span>
+                </button>
+                <button
+                  onClick={() => { setActiveTab('budgets'); setNavOpen(false); }}
+                  className={`flex items-center space-x-2 px-6 py-4 font-medium transition-colors ${activeTab === 'budgets' ? 'text-primary-600 bg-primary-100' : 'text-gray-600 hover:text-primary-600'}`}
+                >
+                  <PieChart className="w-5 h-5" />
+                  <span>Budgets</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </nav>
 
       {/* Main Content */}
-      <main className="container mx-auto px-4 py-8">
+      <main className="w-full py-8">
         {activeTab === 'dashboard' && <Dashboard />}
         {activeTab === 'upload' && <ReceiptUpload onUploadSuccess={() => setActiveTab('receipts')} />}
         {activeTab === 'receipts' && <ReceiptList />}
@@ -211,10 +263,11 @@ function App() {
 
       {/* Footer */}
       <footer className="bg-white border-t mt-12">
-        <div className="container mx-auto px-4 py-6 text-center text-gray-600 text-sm">
+        <div className="w-full py-6 text-center text-gray-600 text-sm">
           <p>© 2026 ReceiptVault - Track Your Expenses in UAE</p>
         </div>
       </footer>
+      </div>
     </div>
   )
 }
