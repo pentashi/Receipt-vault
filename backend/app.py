@@ -17,13 +17,16 @@ app = Flask(__name__)
 app.config.from_object(Config)
 
 # Initialize extensions
-CORS(app, origins=app.config['CORS_ORIGINS'].split(','))
 db.init_app(app)
+
 
 # Register blueprints
 app.register_blueprint(receipts_bp, url_prefix='/api/v1/receipts')
 app.register_blueprint(expenses_bp, url_prefix='/api/v1/expenses')
 app.register_blueprint(budgets_bp, url_prefix='/api/v1/budgets')
+
+# Apply CORS globally after blueprints
+CORS(app, origins=app.config['CORS_ORIGINS'].split(','))
 
 # Create database tables
 with app.app_context():
