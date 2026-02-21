@@ -8,6 +8,7 @@ from models import db
 from routes.receipts import receipts_bp
 from routes.expenses import expenses_bp
 from routes.budgets import budgets_bp
+from routes.auth import auth_bp
 
 # Load environment variables
 load_dotenv()
@@ -24,9 +25,10 @@ db.init_app(app)
 app.register_blueprint(receipts_bp, url_prefix='/api/v1/receipts')
 app.register_blueprint(expenses_bp, url_prefix='/api/v1/expenses')
 app.register_blueprint(budgets_bp, url_prefix='/api/v1/budgets')
+app.register_blueprint(auth_bp, url_prefix='/api/v1/auth')
 
 # Apply CORS globally after blueprints
-CORS(app, origins=app.config['CORS_ORIGINS'].split(','))
+CORS(app, origins=app.config['CORS_ORIGINS'].split(','), supports_credentials=True)
 
 # Create database tables
 with app.app_context():

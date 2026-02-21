@@ -3,17 +3,27 @@ import Dashboard from './components/Dashboard'
 import ReceiptUpload from './components/ReceiptUpload'
 import ReceiptList from './components/ReceiptList'
 import BudgetManager from './components/BudgetManager'
-import { Upload, Receipt, PieChart, TrendingUp, Bell } from 'lucide-react'
-import { getBudgetAlerts } from './services/api'
+import LoginModal from './components/LoginModal'
+import { Upload, Receipt, PieChart, TrendingUp, Bell, LogIn, LogOut, User } from 'lucide-react'
+import { getBudgetAlerts, logoutUser } from './services/api'
 
 type TabType = 'dashboard' | 'upload' | 'receipts' | 'budgets'
 import { Toaster } from 'react-hot-toast'
+import toast from 'react-hot-toast'
+
+interface AuthUser {
+  id: number
+  email: string
+  name: string
+}
 
 function App() {
     const [navOpen, setNavOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<TabType>('dashboard')
   const [alerts, setAlerts] = useState<any[]>([])
   const [showAlerts, setShowAlerts] = useState(false)
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null)
+  const [showLoginModal, setShowLoginModal] = useState(false)
 
   useEffect(() => {
     loadAlerts()
@@ -45,6 +55,16 @@ function App() {
       setAlerts(data.alerts || [])
     } catch (error) {
       console.error('Error loading alerts:', error)
+    }
+  }
+
+  const handleLogout = async () => {
+    try {
+      await logoutUser()
+      setCurrentUser(null)
+      toast.success('Logged out successfully')
+    } catch (error) {
+      console.error('Error logging out:', error)
     }
   }
 
@@ -142,6 +162,33 @@ function App() {
                   </div>
                 )}
               </div>
+
+              {/* Login / User button */}
+              {currentUser ? (
+                <div className="flex items-center space-x-2">
+                  <span className="flex items-center space-x-1 text-sm text-white/90">
+                    <User className="w-4 h-4" />
+                    <span className="hidden sm:inline">{currentUser.name || currentUser.email}</span>
+                  </span>
+                  <button
+                    onClick={handleLogout}
+                    className="flex items-center space-x-1 px-3 py-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-sm"
+                    title="Logout"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    <span className="hidden sm:inline">Logout</span>
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowLoginModal(true)}
+                  className="flex items-center space-x-1 px-3 py-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-sm"
+                  title="Login"
+                >
+                  <LogIn className="w-4 h-4" />
+                  <span className="hidden sm:inline">Login</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -268,6 +315,17 @@ function App() {
         </div>
       </footer>
       </div>
+
+      {/* Login Modal */}
+      {showLoginModal && (
+        <LoginModal
+          onClose={() => setShowLoginModal(false)}
+          onSuccess={(user) => {
+            setCurrentUser(user)
+            setShowLoginModal(false)
+          }}
+        />
+      )}
     </div>
   )
 }

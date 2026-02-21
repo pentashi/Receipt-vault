@@ -111,4 +111,25 @@ export const getBudgetAlerts = async (month?: number, year?: number) => {
   return response.data
 }
 
+// Auth APIs
+export const registerUser = async (data: { email: string; password: string; name?: string }) => {
+  const response = await api.post('/auth/register', data, { withCredentials: true })
+  return response.data
+}
+
+export const loginUser = async (data: { email: string; password: string }) => {
+  const response = await api.post('/auth/login', data, { withCredentials: true })
+  return response.data
+}
+
+export const logoutUser = async () => {
+  const response = await api.post('/auth/logout', {}, { withCredentials: true })
+  return response.data
+}
+
+export const getCurrentUser = async () => {
+  const response = await api.get('/auth/me', { withCredentials: true })
+  return response.data
+}
+
 export default api
