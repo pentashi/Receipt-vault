@@ -1,4 +1,5 @@
 from flask import Blueprint, request, jsonify, Response
+from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy import func, extract
 from datetime import datetime, timedelta
 from collections import defaultdict
@@ -11,16 +12,101 @@ from config import Config
 expenses_bp = Blueprint('expenses', __name__)
 
 
+@expenses_bp.route('/subscriptions', methods=['GET'])
+@jwt_required()
+def get_subscriptions():
+    """Analyze transaction patterns to identify recurring bills/subscriptions"""
+    user_id = get_jwt_identity()
+    try:
+        # Get all receipts for the last 6 months to detect patterns
+        start_date = datetime.now().date() - timedelta(days=180)
+        receipts = Receipt.query.filter(
+            Receipt.user_id == user_id,
+            Receipt.date >= start_date
+        ).all()
+        
+        # Group by store name to find recurring payments
+        merchant_counts = defaultdict(list)
+        for r in receipts:
+            merchant_counts[r.store_name].append(r)
+            
+        subscriptions = []
+        for merchant, transactions in merchant_counts.items():
+            if len(transactions) >= 3:
+                # Basic recurring check: if merchant occurs monthly
+                # Sort by date
+                sorted_tx = sorted(transactions, key=lambda x: x.date)
+                
+                # Calculate intervals
+                intervals = []
+                for i in range(1, len(sorted_tx)):
+                    intervals.append((sorted_tx[i].date - sorted_tx[i-1].date).days)
+                
+                # If average interval is around 30 days (25-35 range)
+                avg_interval = sum(intervals) / len(intervals)
+                if 25 <= avg_interval <= 35:
+                    latest = sorted_tx[-1]
+                    subscriptions.append({
+                        'merchant': merchant,
+                        'category': latest.category,
+                        'avg_amount': sum(float(tx.total_incl_vat) for tx in transactions) / len(transactions),
+                        'frequency': 'Monthly',
+                        'last_payment': latest.date.isoformat(),
+                        'next_predicted': (latest.date + timedelta(days=30)).isoformat(),
+                        'confidence': 'High'
+                    })
+        
+        return jsonify({'subscriptions': subscriptions}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@expenses_bp.route('/forecast', methods=['GET'])
+@jwt_required()
+def get_spending_forecast():
+    """Predict end-of-month spending based on current pace"""
+    user_id = get_jwt_identity()
+    try:
+        now = datetime.now()
+        month = now.month
+        year = now.year
+        day = now.day
+        import calendar
+        _, days_in_month = calendar.monthrange(year, month)
+        
+        # Get current month total
+        current_spent = db.session.query(func.sum(Receipt.total_incl_vat)).filter(
+            Receipt.user_id == user_id,
+            extract('month', Receipt.date) == month,
+            extract('year', Receipt.date) == year
+        ).scalar() or 0
+        
+        daily_avg = float(current_spent) / day
+        projected = daily_avg * days_in_month
+        
+        return jsonify({
+            'current_spent': float(current_spent),
+            'daily_average': round(daily_avg, 2),
+            'projected_total': round(projected, 2),
+            'days_remaining': days_in_month - day,
+            'confidence': 'Medium' if day > 10 else 'Low'
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @expenses_bp.route('/summary', methods=['GET'])
+@jwt_required()
 def get_expense_summary():
     """Get expense summary for a period"""
+    user_id = get_jwt_identity()
     try:
         # Query parameters
         period = request.args.get('period', 'month')  # month, year, week
         year = request.args.get('year', datetime.now().year, type=int)
         month = request.args.get('month', datetime.now().month, type=int)
         
-        query = Receipt.query
+        query = Receipt.query.filter_by(user_id=user_id)
         
         if period == 'month':
             query = query.filter(
@@ -67,9 +153,63 @@ def get_expense_summary():
         return jsonify({'error': str(e)}), 500
 
 
+@expenses_bp.route('/categories', methods=['GET'])
+@jwt_required()
+def get_categories():
+    """Get all allowed expense categories"""
+    return jsonify({'categories': Config.EXPENSE_CATEGORIES}), 200
+
+
+@expenses_bp.route('/daily-trends', methods=['GET'])
+@jwt_required()
+def get_daily_trends():
+    """Get daily expense trends for the current month or specified period"""
+    user_id = get_jwt_identity()
+    try:
+        month = request.args.get('month', datetime.now().month, type=int)
+        year = request.args.get('year', datetime.now().year, type=int)
+        
+        # Determine number of days in the month
+        import calendar
+        _, num_days = calendar.monthrange(year, month)
+        
+        start_date = datetime(year, month, 1).date()
+        end_date = datetime(year, month, num_days).date()
+        
+        receipts = Receipt.query.filter(
+            Receipt.user_id == user_id,
+            Receipt.date >= start_date,
+            Receipt.date <= end_date
+        ).all()
+        
+        # Initialize dictionary with all days of the month
+        daily_data = {i: 0.0 for i in range(1, num_days + 1)}
+        
+        for receipt in receipts:
+            day = receipt.date.day
+            daily_data[day] += float(receipt.total_incl_vat)
+            
+        # Convert to sorted list of dicts
+        trends = [
+            {'day': day, 'total_spent': amount}
+            for day, amount in sorted(daily_data.items())
+        ]
+        
+        return jsonify({
+            'month': month,
+            'year': year,
+            'trends': trends
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @expenses_bp.route('/trends', methods=['GET'])
+@jwt_required()
 def get_expense_trends():
     """Get expense trends over time"""
+    user_id = get_jwt_identity()
     try:
         months = request.args.get('months', 6, type=int)  # Last N months
         
@@ -78,6 +218,7 @@ def get_expense_trends():
         start_date = end_date - timedelta(days=months * 30)
         
         receipts = Receipt.query.filter(
+            Receipt.user_id == user_id,
             Receipt.date >= start_date,
             Receipt.date <= end_date
         ).all()
@@ -110,21 +251,11 @@ def get_expense_trends():
         return jsonify({'error': str(e)}), 500
 
 
-@expenses_bp.route('/categories', methods=['GET'])
-def get_categories():
-    """Get list of expense categories"""
-    try:
-        return jsonify({
-            'categories': Config.EXPENSE_CATEGORIES
-        }), 200
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
 @expenses_bp.route('/top-stores', methods=['GET'])
+@jwt_required()
 def get_top_stores():
     """Get top stores by spending"""
+    user_id = get_jwt_identity()
     try:
         limit = request.args.get('limit', 10, type=int)
         
@@ -133,7 +264,8 @@ def get_top_stores():
             Receipt.store_name,
             func.count(Receipt.id).label('visit_count'),
             func.sum(Receipt.total_incl_vat).label('total_spent')
-        ).group_by(Receipt.store_name)\
+        ).filter(Receipt.user_id == user_id)\
+         .group_by(Receipt.store_name)\
          .order_by(func.sum(Receipt.total_incl_vat).desc())\
          .limit(limit)\
          .all()
@@ -156,14 +288,16 @@ def get_top_stores():
 
 
 @expenses_bp.route('/export', methods=['GET'])
+@jwt_required()
 def export_expenses():
     """Export expenses as CSV file"""
+    user_id = get_jwt_identity()
     try:
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
         format_type = request.args.get('format', 'csv')  # csv or json
         
-        query = Receipt.query
+        query = Receipt.query.filter_by(user_id=user_id)
         
         if start_date:
             query = query.filter(Receipt.date >= datetime.fromisoformat(start_date).date())
