@@ -1,0 +1,5 @@
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args: [ 'build', '--build-arg', 'VITE_API_URL=https://receiptvault-backend-210041012141.me-central1.run.app/api/v1', '-t', 'me-central1-docker.pkg.dev/receiptvault-493402/receiptvault-repo/receiptvault-frontend:latest', '.' ]
+images:
+- 'me-central1-docker.pkg.dev/receiptvault-493402/receiptvault-repo/receiptvault-frontend:latest'

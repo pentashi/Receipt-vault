@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
-import { Plus, Edit, Trash2, AlertTriangle } from 'lucide-react'
+import { Plus, Edit, Trash2, AlertTriangle, PieChart, Target, Zap } from 'lucide-react'
 import { getBudgets, createBudget, updateBudget, deleteBudget, getCategories } from '../services/api'
 import ConfirmDialog from './ConfirmDialog'
 
@@ -18,22 +18,23 @@ export default function BudgetManager() {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [deleteId, setDeleteId] = useState<number|null>(null)
   const [shownWarnings, setShownWarnings] = useState<{[key: number]: boolean}>({});
-  // Show warning toast for approaching limit, only once per budget per session
+
   useEffect(() => {
     budgets.forEach(budget => {
       const percentageUsed = budget.percentage_used || 0;
       const isWarning = percentageUsed >= budget.alert_threshold && !budget.is_exceeded;
       if (isWarning && !shownWarnings[budget.id]) {
         toast(() => (
-          <span>
-            <AlertTriangle className="inline w-5 h-5 text-yellow-600 mr-2" />
-            <b>Warning:</b> Approaching limit for <b>{budget.category}</b>
-          </span>
-        ), { icon: null, duration: 4000 });
+          <div className="flex items-center space-x-3">
+            <AlertTriangle className="w-5 h-5 text-yellow-500" />
+            <span className="text-sm font-bold">
+              Approaching limit for <span className="text-primary-600">{budget.category}</span>
+            </span>
+          </div>
+        ), { duration: 4000 });
         setShownWarnings(prev => ({ ...prev, [budget.id]: true }));
       }
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [budgets]);
 
   const currentDate = new Date()
@@ -47,14 +48,24 @@ export default function BudgetManager() {
   const loadData = async () => {
     try {
       setLoading(true)
-      const [budgetsData, categoriesData] = await Promise.all([
-        getBudgets(currentMonth, currentYear),
-        getCategories()
-      ])
-      setBudgets(budgetsData.budgets || [])
-      setCategories(categoriesData.categories || [])
+      // Load categories first or independently to ensure dropdown works even if budgets fail
+      try {
+        const categoriesData = await getCategories();
+        setCategories(categoriesData.categories || []);
+      } catch (catError) {
+        console.error('Error loading categories:', catError);
+        toast.error('Could not load expense categories');
+      }
+
+      try {
+        const budgetsData = await getBudgets(currentMonth, currentYear);
+        setBudgets(budgetsData.budgets || []);
+      } catch (budgetError) {
+        console.error('Error loading budgets:', budgetError);
+        // Don't toast here if it's just an empty list or first time use
+      }
     } catch (error) {
-      console.error('Error loading budgets:', error)
+      console.error('General data loading error:', error)
     } finally {
       setLoading(false)
     }
@@ -62,13 +73,13 @@ export default function BudgetManager() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    
     try {
       if (editingBudget) {
         await updateBudget(editingBudget.id, {
           monthly_limit: parseFloat(formData.monthly_limit),
           alert_threshold: parseFloat(formData.alert_threshold)
         })
+        toast.success('Budget updated')
       } else {
         await createBudget({
           category: formData.category,
@@ -77,11 +88,9 @@ export default function BudgetManager() {
           year: currentYear,
           alert_threshold: parseFloat(formData.alert_threshold)
         })
+        toast.success('Budget created')
       }
-      
       setShowModal(false)
-      setEditingBudget(null)
-      setFormData({ category: '', monthly_limit: '', alert_threshold: '80' })
       loadData()
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Failed to save budget')
@@ -107,10 +116,10 @@ export default function BudgetManager() {
     if (deleteId == null) return
     try {
       await deleteBudget(deleteId)
-      toast.success('Budget deleted successfully')
+      toast.success('Budget removed')
       loadData()
     } catch (error) {
-      toast.error('Failed to delete budget')
+      toast.error('Deletion failed')
     } finally {
       setConfirmOpen(false)
       setDeleteId(null)
@@ -120,20 +129,25 @@ export default function BudgetManager() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-gray-500">Loading budgets...</div>
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary-600"></div>
       </div>
     )
   }
 
   return (
-    <div className="space-y-6 bg-gray-50 min-h-screen">
+    <div className="space-y-6 animate-in fade-in duration-500">
       {/* Header */}
-      <div className="flex items-center justify-between bg-white rounded-lg shadow p-6 mb-6">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900">Budget Manager</h2>
-          <p className="text-gray-700 mt-1">
-            Manage your monthly budgets for {new Date(currentYear, currentMonth - 1).toLocaleString('default', { month: 'long', year: 'numeric' })}
-          </p>
+      <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-800 p-8 flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div className="flex items-center space-x-4">
+          <div className="p-3 bg-primary-100 dark:bg-primary-900/40 rounded-2xl">
+            <Target className="w-8 h-8 text-primary-600 dark:text-primary-400" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-black text-gray-900 dark:text-white uppercase tracking-tight">Budget Vault</h2>
+            <p className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest">
+              {new Date(currentYear, currentMonth - 1).toLocaleString('default', { month: 'long', year: 'numeric' })}
+            </p>
+          </div>
         </div>
         <button
           onClick={() => {
@@ -141,22 +155,25 @@ export default function BudgetManager() {
             setFormData({ category: '', monthly_limit: '', alert_threshold: '80' })
             setShowModal(true)
           }}
-          className="flex items-center space-x-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+          className="flex items-center justify-center space-x-2 px-8 py-4 bg-primary-600 text-white rounded-2xl font-black uppercase tracking-widest hover:bg-primary-700 shadow-xl shadow-primary-200 dark:shadow-none transition-all active:scale-95"
         >
           <Plus className="w-5 h-5" />
-          <span>Add Budget</span>
+          <span>New Budget</span>
         </button>
       </div>
 
       {/* Budgets Grid */}
       {budgets.length === 0 ? (
-        <div className="bg-white rounded-lg shadow p-12 text-center">
-          <p className="text-gray-500 mb-4">No budgets set for this month</p>
+        <div className="bg-white dark:bg-gray-900 rounded-3xl border-2 border-dashed border-gray-200 dark:border-gray-800 p-20 text-center">
+          <div className="w-20 h-20 bg-gray-50 dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-6">
+            <PieChart className="w-10 h-10 text-gray-300 dark:text-gray-600" />
+          </div>
+          <p className="text-gray-500 dark:text-gray-400 font-bold uppercase tracking-widest text-sm mb-6">No active budgets for this month</p>
           <button
             onClick={() => setShowModal(true)}
-            className="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+            className="px-8 py-3 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-xl font-black uppercase tracking-widest text-xs hover:opacity-90 transition-all"
           >
-            Create Your First Budget
+            Setup Monthly Goals
           </button>
         </div>
       ) : (
@@ -169,65 +186,81 @@ export default function BudgetManager() {
             return (
               <div
                 key={budget.id}
-                className={`bg-white rounded-lg shadow-lg p-6 border-2 transition-all ${
-                  isExceeded ? 'border-red-500 shadow-red-200' : isWarning ? 'border-yellow-500 shadow-yellow-200' : 'border-transparent'
+                className={`bg-white dark:bg-gray-900 rounded-3xl shadow-sm border-2 p-6 transition-all group ${
+                  isExceeded 
+                    ? 'border-red-500 bg-red-50/10 dark:bg-red-950/5' 
+                    : isWarning 
+                      ? 'border-yellow-500 bg-yellow-50/10 dark:bg-yellow-950/5' 
+                      : 'border-gray-100 dark:border-gray-800'
                 }`}
               >
-                {/* Only show persistent badge if EXCEEDED */}
-                {isExceeded && (
-                  <div className="mb-3 flex items-center space-x-2 p-3 rounded-lg bg-red-100 border border-red-300">
-                    <AlertTriangle className="w-5 h-5 text-red-600" />
-                    <span className="text-sm font-semibold text-red-700">
-                      ⚠️ BUDGET EXCEEDED!
-                    </span>
-                  </div>
-                )}
-
-                <div className="flex items-start justify-between mb-4">
+                <div className="flex items-start justify-between mb-6">
                   <div>
-                    <h3 className="text-lg font-semibold text-gray-900">{budget.category}</h3>
-                    <p className="text-sm text-gray-600 mt-1">
-                      {budget.monthly_limit} AED / month
-                    </p>
+                    <span className="text-[10px] font-black uppercase tracking-widest text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-950/30 px-2 py-1 rounded mb-2 inline-block">
+                      {budget.category}
+                    </span>
+                    <h3 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">
+                      {budget.monthly_limit.toLocaleString()} <span className="text-xs font-normal opacity-50">AED</span>
+                    </h3>
                   </div>
-                  <div className="flex space-x-1">
+                  <div className="flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
                       onClick={() => handleEdit(budget)}
-                      className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"
+                      className="p-2 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-xl transition-colors"
                     >
                       <Edit className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => handleDelete(budget.id)}
-                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg"
+                      className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-xl transition-colors"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
 
-                <div className="space-y-3">
-                  {/* Progress Bar */}
+                <div className="space-y-6">
                   <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span className="text-gray-600">Spent</span>
-                      <span className="font-semibold">{budget.actual_spending.toFixed(2)} AED</span>
+                    <div className="flex justify-between items-baseline mb-3">
+                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Spending Progress</p>
+                      <p className={`text-sm font-black ${isExceeded ? 'text-red-600' : isWarning ? 'text-yellow-600' : 'text-gray-900 dark:text-white'}`}>
+                        {budget.actual_spending.toFixed(0)} <span className="text-[10px] font-normal">AED</span>
+                      </p>
                     </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
+                    
+                    <div className="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-3 overflow-hidden">
                       <div
-                        className={`h-2 rounded-full transition-all ${
-                          isExceeded ? 'bg-red-500' : isWarning ? 'bg-yellow-500' : 'bg-green-500'
+                        className={`h-full rounded-full transition-all duration-1000 ${
+                          isExceeded ? 'bg-red-500' : isWarning ? 'bg-yellow-500' : 'bg-primary-600'
                         }`}
                         style={{ width: `${Math.min(percentageUsed, 100)}%` }}
                       />
                     </div>
-                    <div className="flex justify-between text-xs mt-1">
-                      <span className="text-gray-500">{percentageUsed.toFixed(1)}% used</span>
-                      <span className={`font-medium ${budget.remaining >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {Math.abs(budget.remaining).toFixed(2)} AED {budget.remaining >= 0 ? 'left' : 'over'}
+                    
+                    <div className="flex justify-between items-center mt-3">
+                      <span className="text-[10px] font-black text-gray-500 uppercase tracking-tighter">
+                        {percentageUsed.toFixed(0)}% Utilized
                       </span>
+                      <div className="flex items-center space-x-1">
+                        {isExceeded ? (
+                          <span className="text-[10px] font-black text-red-600 uppercase tracking-tighter bg-red-100 dark:bg-red-950 px-2 py-0.5 rounded">
+                            {Math.abs(budget.remaining).toFixed(0)} AED OVER
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-black text-green-600 dark:text-green-400 uppercase tracking-tighter bg-green-100 dark:bg-green-950 px-2 py-0.5 rounded">
+                            {budget.remaining.toFixed(0)} AED LEFT
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
+                  
+                  {isExceeded && (
+                    <div className="flex items-center space-x-2 p-3 bg-red-100 dark:bg-red-950 rounded-2xl border border-red-200 dark:border-red-900/50 animate-pulse">
+                      <AlertTriangle className="w-4 h-4 text-red-600" />
+                      <span className="text-[10px] font-black text-red-800 dark:text-red-200 uppercase tracking-widest">Critical: Limit Exceeded</span>
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -235,30 +268,30 @@ export default function BudgetManager() {
         </div>
       )}
 
-      {/* Confirm Delete Dialog */}
+      {/* Modals */}
       <ConfirmDialog
         open={confirmOpen}
-        title="Delete Budget"
-        message="Are you sure you want to delete this budget? This action cannot be undone."
+        title="Remove Budget Goal"
+        message="Are you sure you want to delete this budget tracking? This will stop alerts for this category."
         onConfirm={confirmDelete}
         onCancel={() => { setConfirmOpen(false); setDeleteId(null) }}
-        confirmText="Delete"
-        cancelText="Cancel"
+        confirmText="Confirm Delete"
+        cancelText="Keep Budget"
       />
 
-      {/* Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-gray-50 rounded-lg shadow-xl max-w-md w-full">
-            <div className="p-6 border-b">
-              <h3 className="text-xl font-bold text-gray-900">
-                {editingBudget ? 'Edit Budget' : 'Create Budget'}
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-2xl max-w-md w-full overflow-hidden border dark:border-gray-800">
+            <div className="p-8 border-b dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/50">
+              <h3 className="text-xl font-black text-gray-900 dark:text-white uppercase tracking-tight">
+                {editingBudget ? 'Adjust Budget' : 'Set New Goal'}
               </h3>
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mt-1">AED Currency</p>
             </div>
             
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+            <form onSubmit={handleSubmit} className="p-8 space-y-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-[0.2em] mb-3">
                   Category
                 </label>
                 <select
@@ -266,7 +299,7 @@ export default function BudgetManager() {
                   onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                   disabled={!!editingBudget}
                   required
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  className="w-full px-4 py-4 border border-gray-200 dark:border-gray-800 rounded-2xl bg-white dark:bg-gray-950 text-gray-900 dark:text-white font-bold focus:ring-2 focus:ring-primary-500 outline-none transition-all"
                 >
                   <option value="">Select Category</option>
                   {categories.map(cat => (
@@ -275,44 +308,44 @@ export default function BudgetManager() {
                 </select>
               </div>
               
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Monthly Limit (AED)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={formData.monthly_limit}
-                  onChange={(e) => setFormData({ ...formData, monthly_limit: e.target.value })}
-                  required
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-[0.2em] mb-3">
+                    Monthly Limit
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={formData.monthly_limit}
+                    onChange={(e) => setFormData({ ...formData, monthly_limit: e.target.value })}
+                    required
+                    className="w-full px-4 py-4 border border-gray-200 dark:border-gray-800 rounded-2xl bg-white dark:bg-gray-950 text-gray-900 dark:text-white font-black focus:ring-2 focus:ring-primary-500 outline-none"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-[0.2em] mb-3">
+                    Alert At (%)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={formData.alert_threshold}
+                    onChange={(e) => setFormData({ ...formData, alert_threshold: e.target.value })}
+                    required
+                    className="w-full px-4 py-4 border border-gray-200 dark:border-gray-800 rounded-2xl bg-white dark:bg-gray-950 text-gray-900 dark:text-white font-bold focus:ring-2 focus:ring-primary-500 outline-none"
+                  />
+                </div>
               </div>
               
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Alert Threshold (%)
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={formData.alert_threshold}
-                  onChange={(e) => setFormData({ ...formData, alert_threshold: e.target.value })}
-                  required
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  You'll be alerted when spending reaches this percentage
-                </p>
-              </div>
-              
-              <div className="flex space-x-3 pt-4">
+              <div className="flex flex-col space-y-3 pt-4">
                 <button
                   type="submit"
-                  className="flex-1 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+                  className="w-full py-4 bg-primary-600 text-white rounded-2xl font-black uppercase tracking-widest hover:bg-primary-700 shadow-xl shadow-primary-200 dark:shadow-none transition-all active:scale-95 flex items-center justify-center space-x-2"
                 >
-                  {editingBudget ? 'Update' : 'Create'}
+                  <Zap className="w-4 h-4 fill-white" />
+                  <span>{editingBudget ? 'Save Changes' : 'Activate Budget'}</span>
                 </button>
                 <button
                   type="button"
@@ -321,7 +354,7 @@ export default function BudgetManager() {
                     setEditingBudget(null)
                     setFormData({ category: '', monthly_limit: '', alert_threshold: '80' })
                   }}
-                  className="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+                  className="w-full py-4 text-gray-500 dark:text-gray-400 font-bold uppercase tracking-widest text-[10px] hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
                 >
                   Cancel
                 </button>

@@ -3,41 +3,63 @@ import Dashboard from './components/Dashboard'
 import ReceiptUpload from './components/ReceiptUpload'
 import ReceiptList from './components/ReceiptList'
 import BudgetManager from './components/BudgetManager'
-import { Upload, Receipt, PieChart, TrendingUp, Bell } from 'lucide-react'
+import Login from './components/Login'
+import { Upload, Receipt, PieChart, TrendingUp, Bell, Sun, Moon, Menu, X, AlertTriangle, LogOut } from 'lucide-react'
 import { getBudgetAlerts } from './services/api'
-
-type TabType = 'dashboard' | 'upload' | 'receipts' | 'budgets'
+import { isAuthenticated, logout, getCurrentUser } from './services/auth'
 import { Toaster } from 'react-hot-toast'
 
+type TabType = 'dashboard' | 'upload' | 'receipts' | 'budgets'
+
 function App() {
-    const [navOpen, setNavOpen] = useState(false)
+  const [isAuth, setIsAuth] = useState(isAuthenticated())
+  const [user, setUser] = useState(getCurrentUser())
+  const [navOpen, setNavOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<TabType>('dashboard')
   const [alerts, setAlerts] = useState<any[]>([])
   const [showAlerts, setShowAlerts] = useState(false)
+  const [showUserMenu, setShowUserMenu] = useState(false)
+  const [darkMode, setDarkMode] = useState(() => {
+    const saved = localStorage.getItem('darkMode')
+    return saved ? JSON.parse(saved) : false
+  })
 
   useEffect(() => {
-    loadAlerts()
-    // Refresh alerts every 30 seconds (not 5 minutes - too long)
-    const interval = setInterval(loadAlerts, 30000)
-    return () => clearInterval(interval)
-  }, [])
+    if (darkMode) {
+      document.documentElement.classList.add('dark')
+    } else {
+      document.documentElement.classList.remove('dark')
+    }
+    localStorage.setItem('darkMode', JSON.stringify(darkMode))
+  }, [darkMode])
 
   useEffect(() => {
-    // Reload alerts when switching tabs (especially after adding receipts or budgets)
-    loadAlerts()
-  }, [activeTab])
+    if (isAuth) {
+      loadAlerts()
+      const interval = setInterval(loadAlerts, 30000)
+      return () => clearInterval(interval)
+    }
+  }, [isAuth])
 
   useEffect(() => {
-    // Close alerts dropdown when clicking outside
+    if (isAuth) {
+      loadAlerts()
+    }
+  }, [activeTab, isAuth])
+
+  useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       const target = e.target as HTMLElement
       if (showAlerts && !target.closest('.alerts-dropdown')) {
         setShowAlerts(false)
       }
+      if (showUserMenu && !target.closest('.user-menu')) {
+        setShowUserMenu(false)
+      }
     }
     document.addEventListener('click', handleClickOutside)
     return () => document.removeEventListener('click', handleClickOutside)
-  }, [showAlerts])
+  }, [showAlerts, showUserMenu])
 
   const loadAlerts = async () => {
     try {
@@ -48,225 +70,230 @@ function App() {
     }
   }
 
+  const handleLoginSuccess = () => {
+    setIsAuth(true)
+    setUser(getCurrentUser())
+  }
+
+  const handleLogout = () => {
+    logout()
+    setIsAuth(false)
+    setUser(null)
+  }
+
+  if (!isAuth) {
+    return (
+      <>
+        <Toaster position="top-right" />
+        <Login onLoginSuccess={handleLoginSuccess} />
+      </>
+    )
+  }
+
   return (
-    <div className="min-h-screen bg-gray-100 w-full">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 transition-colors duration-300 w-full">
       <div className="w-full max-w-screen-lg mx-auto px-2">
-      <Toaster position="top-right" toastOptions={{ duration: 4000 }} />
-      {/* Header */}
-      <header className="bg-primary-600 text-white shadow-lg">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <Receipt className="w-8 h-8" />
-              <h1 className="text-2xl font-bold">ReceiptVault</h1>
-            </div>
-            <div className="flex items-center space-x-4">
+        <Toaster position="top-right" toastOptions={{ duration: 4000 }} />
+        
+        {/* Header */}
+        <header className="bg-white dark:bg-gray-900 border-b dark:border-gray-800 sticky top-0 z-50">
+          <div className="container mx-auto px-4 py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="bg-primary-600 p-2 rounded-xl">
+                  <Receipt className="w-6 h-6 text-white" />
+                </div>
+                <h1 className="text-xl font-black text-gray-900 dark:text-white tracking-tight">ReceiptVault</h1>
+              </div>
               
-              {/* Notification Bell */}
-              <div className="relative alerts-dropdown">
+              <div className="flex items-center space-x-2">
+                {/* Theme Toggle */}
                 <button
-                  onClick={() => setShowAlerts(!showAlerts)}
-                  className={`relative p-2 hover:bg-primary-700 rounded-lg transition-colors ${
-                    alerts.length > 0 ? 'animate-pulse' : ''
-                  }`}
-                  title="Budget Alerts"
+                  onClick={() => setDarkMode(!darkMode)}
+                  className="p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl transition-all"
+                  aria-label="Toggle dark mode"
                 >
-                  <Bell className={`w-6 h-6 ${alerts.length > 0 ? 'text-yellow-300' : ''}`} />
-                  {alerts.length > 0 && (
-                    <span className="absolute top-0 right-0 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-white transform translate-x-1/2 -translate-y-1/2 bg-red-600 rounded-full animate-bounce">
-                      {alerts.length}
-                    </span>
-                  )}
+                  {darkMode ? <Sun className="w-5 h-5 text-yellow-400" /> : <Moon className="w-5 h-5" />}
                 </button>
 
-                {/* Alerts Dropdown */}
-                {showAlerts && (
-                  <div className="absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-xl border z-50">
-                    <div className="p-4 border-b">
-                      <h3 className="font-semibold text-gray-900">Budget Alerts</h3>
-                    </div>
-                    
-                    {alerts.length === 0 ? (
-                      <div className="p-6 text-center text-gray-500">
-                        No budget alerts. You're on track! 🎉
+                {/* Notification Bell */}
+                <div className="relative alerts-dropdown">
+                  <button
+                    onClick={() => setShowAlerts(!showAlerts)}
+                    className={`relative p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl transition-all ${
+                      alerts.length > 0 ? 'animate-pulse' : ''
+                    }`}
+                  >
+                    <Bell className={`w-5 h-5 ${alerts.length > 0 ? 'text-red-500' : ''}`} />
+                    {alerts.length > 0 && (
+                      <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
+                    )}
+                  </button>
+
+                  {/* Alerts Dropdown */}
+                  {showAlerts && (
+                    <div className="absolute right-0 mt-3 w-80 bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border dark:border-gray-800 z-50 overflow-hidden">
+                      <div className="p-4 border-b dark:border-gray-800">
+                        <h3 className="font-bold text-gray-900 dark:text-white">Budget Alerts</h3>
                       </div>
-                    ) : (
-                      <div className="max-h-96 overflow-y-auto">
-                        {alerts.map((alert, idx) => (
-                          <div
-                            key={idx}
-                            className={`p-4 border-b last:border-b-0 ${
-                              alert.alert_type === 'exceeded'
-                                ? 'bg-red-50'
-                                : 'bg-yellow-50'
-                            }`}
-                          >
-                            <div className="flex items-start justify-between">
-                              <div className="flex-1">
-                                <div className="flex items-center space-x-2">
-                                  <span
-                                    className={`inline-block px-2 py-1 text-xs font-semibold rounded ${
-                                      alert.alert_type === 'exceeded'
-                                        ? 'bg-red-600 text-white'
-                                        : 'bg-yellow-600 text-white'
-                                    }`}
-                                  >
-                                    {alert.alert_type === 'exceeded' ? '⚠️ EXCEEDED' : '⚠️ WARNING'}
-                                  </span>
-                                  <span className="font-medium text-gray-900">{alert.category}</span>
+                      
+                      {alerts.length === 0 ? (
+                        <div className="p-8 text-center text-gray-500 dark:text-gray-400">
+                          <p className="text-sm font-medium">You're all set! No alerts. 🎉</p>
+                        </div>
+                      ) : (
+                        <div className="max-h-96 overflow-y-auto">
+                          {alerts.map((alert, idx) => (
+                            <div
+                              key={idx}
+                              className={`p-4 border-b dark:border-gray-800 last:border-b-0 ${
+                                alert.alert_type === 'exceeded'
+                                  ? 'bg-red-50 dark:bg-red-950/20'
+                                  : 'bg-yellow-50 dark:bg-yellow-950/20'
+                              }`}
+                            >
+                              <div className="flex items-start space-x-3">
+                                <div className={`p-1.5 rounded-lg ${alert.alert_type === 'exceeded' ? 'bg-red-100 dark:bg-red-900/40 text-red-600' : 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-600'}`}>
+                                  <AlertTriangle className="w-4 h-4" />
                                 </div>
-                                <p className="mt-1 text-sm text-gray-700">{alert.message}</p>
-                                <div className="mt-2 text-xs text-gray-600">
-                                  <span className="font-medium">Spent:</span> {alert.actual_spending.toFixed(2)} AED
-                                  {' / '}
-                                  <span className="font-medium">Budget:</span> {alert.monthly_limit} AED
+                                <div className="flex-1">
+                                  <p className="text-sm font-bold text-gray-900 dark:text-white">{alert.category}</p>
+                                  <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">{alert.message}</p>
                                 </div>
                               </div>
                             </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    
-                    <div className="p-3 bg-gray-50 text-center">
-                      <button
-                        onClick={() => {
-                          setShowAlerts(false)
-                          setActiveTab('budgets')
-                        }}
-                        className="text-sm text-primary-600 hover:text-primary-700 font-medium"
-                      >
-                        Manage Budgets →
-                      </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
+
+                {/* User Menu */}
+                <div className="relative user-menu ml-2">
+                  <button
+                    onClick={() => setShowUserMenu(!showUserMenu)}
+                    className="flex items-center space-x-2 p-1 pl-2 pr-3 bg-gray-50 dark:bg-gray-800 border dark:border-gray-700 rounded-2xl hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all"
+                  >
+                    <div className="w-8 h-8 rounded-xl bg-primary-100 dark:bg-primary-900/40 flex items-center justify-center text-primary-600 dark:text-primary-400 font-bold text-sm">
+                      {user?.name?.charAt(0) || 'U'}
+                    </div>
+                    <span className="hidden md:block text-sm font-bold text-gray-700 dark:text-gray-300 max-w-[100px] truncate">
+                      {user?.name || 'User'}
+                    </span>
+                  </button>
+
+                  {showUserMenu && (
+                    <div className="absolute right-0 mt-3 w-56 bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border dark:border-gray-800 z-50 overflow-hidden">
+                      <div className="p-4 border-b dark:border-gray-800">
+                        <p className="text-sm font-black text-gray-900 dark:text-white truncate">{user?.name}</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">{user?.email}</p>
+                        {user?.is_guest && (
+                          <span className="inline-block mt-2 px-2 py-0.5 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 text-[10px] font-black uppercase tracking-wider rounded-md">
+                            Guest Session
+                          </span>
+                        )}
+                      </div>
+                      <div className="p-2">
+                        <button
+                          onClick={handleLogout}
+                          className="w-full flex items-center space-x-3 px-3 py-2.5 text-sm font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-xl transition-all"
+                        >
+                          <LogOut className="w-4 h-4" />
+                          <span>Sign Out</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </header>
+        </header>
 
-      {/* Navigation */}
-      <nav className="bg-white shadow-sm border-b">
-        <div className="w-full">
-          {/* Desktop Tabs */}
-          <div className="hidden sm:flex space-x-1">
-            <button
-              onClick={() => setActiveTab('dashboard')}
-              className={`flex items-center space-x-2 px-6 py-4 font-medium transition-colors ${
-                activeTab === 'dashboard'
-                  ? 'text-primary-600 border-b-2 border-primary-600'
-                  : 'text-gray-600 hover:text-primary-600'
-              }`}
-            >
-              <TrendingUp className="w-5 h-5" />
-              <span>Dashboard</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('upload')}
-              className={`flex items-center space-x-2 px-6 py-4 font-medium transition-colors ${
-                activeTab === 'upload'
-                  ? 'text-primary-600 border-b-2 border-primary-600'
-                  : 'text-gray-600 hover:text-primary-600'
-              }`}
-            >
-              <Upload className="w-5 h-5" />
-              <span>Upload Receipt</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('receipts')}
-              className={`flex items-center space-x-2 px-6 py-4 font-medium transition-colors ${
-                activeTab === 'receipts'
-                  ? 'text-primary-600 border-b-2 border-primary-600'
-                  : 'text-gray-600 hover:text-primary-600'
-              }`}
-            >
-              <Receipt className="w-5 h-5" />
-              <span>My Receipts</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('budgets')}
-              className={`flex items-center space-x-2 px-6 py-4 font-medium transition-colors ${
-                activeTab === 'budgets'
-                  ? 'text-primary-600 border-b-2 border-primary-600'
-                  : 'text-gray-600 hover:text-primary-600'
-              }`}
-            >
-              <PieChart className="w-5 h-5" />
-              <span>Budgets</span>
-            </button>
-          </div>
-          {/* Mobile: Only Dashboard visible, hamburger for others */}
-          <div className="flex sm:hidden items-center justify-between">
-            <button
-              onClick={() => setActiveTab('dashboard')}
-              className={`flex items-center space-x-2 px-4 py-4 font-medium transition-colors ${activeTab === 'dashboard' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-gray-600 hover:text-primary-600'}`}
-            >
-              <TrendingUp className="w-5 h-5" />
-              <span>Dashboard</span>
-            </button>
-            <button
-              className="p-2 rounded-lg hover:bg-gray-200 focus:outline-none border border-gray-300"
-              onClick={() => setNavOpen(!navOpen)}
-              aria-label={navOpen ? 'Close navigation menu' : 'Open navigation menu'}
-            >
-              {navOpen ? (
-                <svg className="w-7 h-7" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" stroke="#222" />
-                </svg>
-              ) : (
-                <svg className="w-7 h-7" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" stroke="#222" />
-                </svg>
-              )}
-            </button>
-          </div>
-          {/* Mobile Hamburger Dropdown for other tabs */}
-          {navOpen && (
-            <div className="sm:hidden absolute left-0 right-0 bg-white border-b z-40">
-              <div className="flex flex-col">
+        {/* Navigation */}
+        <nav className="bg-white dark:bg-gray-900 border-b dark:border-gray-800 mb-6">
+          <div className="w-full">
+            <div className="hidden sm:flex items-center space-x-1 p-1">
+              {[
+                { id: 'dashboard', label: 'Dashboard', icon: TrendingUp },
+                { id: 'upload', label: 'Upload', icon: Upload },
+                { id: 'receipts', label: 'Receipts', icon: Receipt },
+                { id: 'budgets', label: 'Budgets', icon: PieChart },
+              ].map((tab) => (
                 <button
-                  onClick={() => { setActiveTab('upload'); setNavOpen(false); }}
-                  className={`flex items-center space-x-2 px-6 py-4 font-medium transition-colors ${activeTab === 'upload' ? 'text-primary-600 bg-primary-100' : 'text-gray-600 hover:text-primary-600'}`}
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id as TabType)}
+                  className={`flex items-center space-x-2 px-6 py-3 rounded-xl font-bold transition-all ${
+                    activeTab === tab.id
+                      ? 'bg-primary-50 dark:bg-primary-950/30 text-primary-600 dark:text-primary-400'
+                      : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
+                  }`}
                 >
-                  <Upload className="w-5 h-5" />
-                  <span>Upload Receipt</span>
+                  <tab.icon className="w-4 h-4" />
+                  <span className="text-sm">{tab.label}</span>
                 </button>
-                <button
-                  onClick={() => { setActiveTab('receipts'); setNavOpen(false); }}
-                  className={`flex items-center space-x-2 px-6 py-4 font-medium transition-colors ${activeTab === 'receipts' ? 'text-primary-600 bg-primary-100' : 'text-gray-600 hover:text-primary-600'}`}
-                >
-                  <Receipt className="w-5 h-5" />
-                  <span>My Receipts</span>
-                </button>
-                <button
-                  onClick={() => { setActiveTab('budgets'); setNavOpen(false); }}
-                  className={`flex items-center space-x-2 px-6 py-4 font-medium transition-colors ${activeTab === 'budgets' ? 'text-primary-600 bg-primary-100' : 'text-gray-600 hover:text-primary-600'}`}
-                >
-                  <PieChart className="w-5 h-5" />
-                  <span>Budgets</span>
-                </button>
-              </div>
+              ))}
             </div>
-          )}
-        </div>
-      </nav>
+            
+            {/* Mobile Nav */}
+            <div className="sm:hidden flex items-center justify-between p-2">
+              <button
+                onClick={() => setActiveTab('dashboard')}
+                className={`flex items-center space-x-2 px-4 py-3 rounded-xl font-bold ${
+                  activeTab === 'dashboard' ? 'text-primary-600 bg-primary-50 dark:bg-primary-950/30' : 'text-gray-500'
+                }`}
+              >
+                <TrendingUp className="w-4 h-4" />
+                <span>Dashboard</span>
+              </button>
+              <button
+                onClick={() => setNavOpen(!navOpen)}
+                className="p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl"
+              >
+                {navOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+              </button>
+            </div>
 
-      {/* Main Content */}
-      <main className="w-full py-8">
-        {activeTab === 'dashboard' && <Dashboard />}
-        {activeTab === 'upload' && <ReceiptUpload onUploadSuccess={() => setActiveTab('receipts')} />}
-        {activeTab === 'receipts' && <ReceiptList />}
-        {activeTab === 'budgets' && <BudgetManager />}
-      </main>
+            {navOpen && (
+              <div className="sm:hidden p-2 space-y-1 bg-white dark:bg-gray-900 border-t dark:border-gray-800">
+                {[
+                  { id: 'upload', label: 'Upload Receipt', icon: Upload },
+                  { id: 'receipts', label: 'My Receipts', icon: Receipt },
+                  { id: 'budgets', label: 'Budgets', icon: PieChart },
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => { setActiveTab(tab.id as TabType); setNavOpen(false); }}
+                    className={`flex items-center space-x-3 w-full px-4 py-3 rounded-xl font-bold ${
+                      activeTab === tab.id
+                        ? 'bg-primary-50 dark:bg-primary-950/30 text-primary-600'
+                        : 'text-gray-500'
+                    }`}
+                  >
+                    <tab.icon className="w-5 h-5" />
+                    <span>{tab.label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </nav>
 
-      {/* Footer */}
-      <footer className="bg-white border-t mt-12">
-        <div className="w-full py-6 text-center text-gray-600 text-sm">
-          <p>© 2026 ReceiptVault - Track Your Expenses in UAE</p>
-        </div>
-      </footer>
+        {/* Main Content */}
+        <main className="w-full pb-12">
+          {activeTab === 'dashboard' && <Dashboard />}
+          {activeTab === 'upload' && <ReceiptUpload onUploadSuccess={() => setActiveTab('receipts')} />}
+          {activeTab === 'receipts' && <ReceiptList />}
+          {activeTab === 'budgets' && <BudgetManager />}
+        </main>
+
+        {/* Footer */}
+        <footer className="py-12 border-t dark:border-gray-800 text-center">
+          <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
+            © 2026 ReceiptVault • Made with ❤️ in UAE
+          </p>
+        </footer>
       </div>
     </div>
   )
