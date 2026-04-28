@@ -2,10 +2,12 @@ gunicorn
 Flask==3.0.0
 Flask-CORS==4.0.0
 Flask-SQLAlchemy==3.1.1
-pytesseract==0.3.10
 Pillow>=10.2.0
 python-dotenv==1.0.0
 SQLAlchemy>=2.0.36
 werkzeug==3.0.1
-gunicorn
 psycopg2-binary
+google-cloud-documentai
+google-cloud-storage
+Flask-JWT-Extended==4.6.0
+bcrypt==4.1.2
