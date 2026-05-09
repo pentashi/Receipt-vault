@@ -210,7 +210,7 @@ export default function ReceiptList() {
     const pathWithoutQuery = receipt.image_path.split('?')[0];
     const extension = pathWithoutQuery.split('.').pop()?.toLowerCase() || 'jpg';
     const normalizedExtension = extension.replace(/[^a-z0-9]/g, '') || 'jpg';
-    const safeDate = String(receipt.date || 'image').replace(/[^\w.-]/g, '_');
+    const safeDate = String(receipt.date || 'no-date').replace(/[^\w.-]/g, '_');
     const fileName = `Receipt_${(receipt.store_name || 'Vault').replace(/[^\w.-]/g, '_')}_${safeDate}.${normalizedExtension}`;
 
     try {
@@ -237,7 +237,7 @@ export default function ReceiptList() {
       document.body.appendChild(fallbackLink);
       fallbackLink.click();
       document.body.removeChild(fallbackLink);
-      toast.success('Direct download was blocked, so the image was opened in a new tab.');
+      toast('Direct download was blocked, so the image was opened in a new tab.', { icon: 'ℹ️' });
     }
   };
 
