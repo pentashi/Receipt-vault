@@ -209,14 +209,30 @@ export default function ReceiptList() {
       return;
     }
 
-    const pathWithoutQuery = receipt.image_path.split('?')[0];
-    const normalizedExtension = (pathWithoutQuery.split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg');
+    let safeImageUrl: string;
+    let pathWithoutQuery: string;
+    try {
+      const parsedUrl = new URL(receipt.image_path, window.location.origin);
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+        throw new Error(`Unsupported protocol: ${parsedUrl.protocol}`);
+      }
+      safeImageUrl = parsedUrl.toString();
+      pathWithoutQuery = parsedUrl.pathname;
+    } catch (urlError) {
+      console.error('Invalid receipt image URL:', urlError);
+      toast.error('Receipt image URL is invalid');
+      return;
+    }
+
+    const allowedExtensions = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg']);
+    const extractedExtension = pathWithoutQuery.split('.').pop()?.toLowerCase().replace(/[^a-z]/g, '') || '';
+    const normalizedExtension = allowedExtensions.has(extractedExtension) ? extractedExtension : 'jpg';
     const safeDate = sanitizeFilenamePart(String(receipt.date || 'no-date'));
     const safeStoreName = sanitizeFilenamePart(receipt.store_name || 'Vault');
     const fileName = `Receipt_${safeStoreName}_${safeDate}.${normalizedExtension}`;
 
     try {
-      const response = await fetch(receipt.image_path);
+      const response = await fetch(safeImageUrl);
       if (!response.ok) {
         throw new Error(`Image request failed with status ${response.status}`);
       }
@@ -233,7 +249,7 @@ export default function ReceiptList() {
     } catch (error) {
       console.error('Receipt image download failed; opening in new tab instead:', error);
       const fallbackLink = document.createElement('a');
-      fallbackLink.href = receipt.image_path;
+      fallbackLink.href = safeImageUrl;
       fallbackLink.target = '_blank';
       fallbackLink.rel = 'noopener noreferrer';
       document.body.appendChild(fallbackLink);
