@@ -210,7 +210,8 @@ export default function ReceiptList() {
     const pathWithoutQuery = receipt.image_path.split('?')[0];
     const extension = pathWithoutQuery.split('.').pop()?.toLowerCase() || 'jpg';
     const normalizedExtension = extension.replace(/[^a-z0-9]/g, '') || 'jpg';
-    const fileName = `Receipt_${(receipt.store_name || 'Vault').replace(/[^\w.-]/g, '_')}_${receipt.date || 'image'}.${normalizedExtension}`;
+    const safeDate = String(receipt.date || 'image').replace(/[^\w.-]/g, '_');
+    const fileName = `Receipt_${(receipt.store_name || 'Vault').replace(/[^\w.-]/g, '_')}_${safeDate}.${normalizedExtension}`;
 
     try {
       const response = await fetch(receipt.image_path);
@@ -236,7 +237,7 @@ export default function ReceiptList() {
       document.body.appendChild(fallbackLink);
       fallbackLink.click();
       document.body.removeChild(fallbackLink);
-      toast('Download is blocked by source permissions; opened image in a new tab instead.');
+      toast.success('Direct download was blocked, so the image was opened in a new tab.');
     }
   };
 
