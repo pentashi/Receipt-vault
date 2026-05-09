@@ -5,6 +5,12 @@ import { Store, Trash2, Edit, Eye, Download, Calendar, CreditCard, Search, Slide
 import { getReceipts, deleteReceipt, getCategories, updateReceipt, createManualReceipt } from '../services/api';
 
 export default function ReceiptList() {
+  type DownloadableReceipt = {
+    image_path?: string;
+    store_name?: string;
+    date?: string;
+  };
+
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string|null>(null);
   const [receipts, setReceipts] = useState<any[]>([])
@@ -195,13 +201,16 @@ export default function ReceiptList() {
 
   const totalSpent = receipts.reduce((sum, r) => sum + parseFloat(r.total_incl_vat), 0);
 
-  const handleDownloadImage = async (receipt: any) => {
+  const handleDownloadImage = async (receipt: DownloadableReceipt | null) => {
     if (!receipt?.image_path) {
       toast.error('No image available for this receipt');
       return;
     }
 
-    const fileName = `Receipt_${(receipt.store_name || 'Vault').replace(/[^\w.-]/g, '_')}_${receipt.date || 'image'}.jpg`;
+    const pathWithoutQuery = receipt.image_path.split('?')[0];
+    const extension = pathWithoutQuery.split('.').pop()?.toLowerCase() || 'jpg';
+    const normalizedExtension = extension.replace(/[^a-z0-9]/g, '') || 'jpg';
+    const fileName = `Receipt_${(receipt.store_name || 'Vault').replace(/[^\w.-]/g, '_')}_${receipt.date || 'image'}.${normalizedExtension}`;
 
     try {
       const response = await fetch(receipt.image_path);
@@ -219,6 +228,7 @@ export default function ReceiptList() {
       document.body.removeChild(link);
       window.URL.revokeObjectURL(objectUrl);
     } catch (error) {
+      console.error('Receipt image download failed; opening in new tab instead:', error);
       const fallbackLink = document.createElement('a');
       fallbackLink.href = receipt.image_path;
       fallbackLink.target = '_blank';
