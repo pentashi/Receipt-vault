@@ -195,6 +195,41 @@ export default function ReceiptList() {
 
   const totalSpent = receipts.reduce((sum, r) => sum + parseFloat(r.total_incl_vat), 0);
 
+  const handleDownloadImage = async (receipt: any) => {
+    if (!receipt?.image_path) {
+      toast.error('No image available for this receipt');
+      return;
+    }
+
+    const fileName = `Receipt_${(receipt.store_name || 'Vault').replace(/[^\w.-]/g, '_')}_${receipt.date || 'image'}.jpg`;
+
+    try {
+      const response = await fetch(receipt.image_path);
+      if (!response.ok) {
+        throw new Error(`Image request failed with status ${response.status}`);
+      }
+
+      const blob = await response.blob();
+      const objectUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(objectUrl);
+    } catch (error) {
+      const fallbackLink = document.createElement('a');
+      fallbackLink.href = receipt.image_path;
+      fallbackLink.target = '_blank';
+      fallbackLink.rel = 'noopener noreferrer';
+      document.body.appendChild(fallbackLink);
+      fallbackLink.click();
+      document.body.removeChild(fallbackLink);
+      toast('Download is blocked by source permissions; opened image in a new tab instead.');
+    }
+  };
+
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
       {/* Mini Stats & Header */}
@@ -405,17 +440,7 @@ export default function ReceiptList() {
                         Enlarge Image
                       </a>
                       <button
-                        onClick={async () => {
-                          const response = await fetch(selectedReceipt.image_path);
-                          const blob = await response.blob();
-                          const url = window.URL.createObjectURL(blob);
-                          const a = document.createElement('a');
-                          a.href = url;
-                          a.download = `Receipt_${selectedReceipt.store_name}_${selectedReceipt.date}.jpg`;
-                          document.body.appendChild(a);
-                          a.click();
-                          window.URL.revokeObjectURL(url);
-                        }}
+                        onClick={() => handleDownloadImage(selectedReceipt)}
                         className="absolute bottom-6 left-6 bg-primary-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-xl opacity-0 group-hover:opacity-100 transition-all"
                       >
                         Download Image
@@ -762,4 +787,3 @@ export default function ReceiptList() {
     </div>
   );
 }
-
