@@ -4,13 +4,15 @@ import ConfirmDialog from './ConfirmDialog';
 import { Store, Trash2, Edit, Eye, Download, Calendar, CreditCard, Search, SlidersHorizontal, Package, X, Plus, MapPin, Phone, Hash, Info } from 'lucide-react';
 import { getReceipts, deleteReceipt, getCategories, updateReceipt, createManualReceipt } from '../services/api';
 
-export default function ReceiptList() {
-  type DownloadableReceipt = {
-    image_path?: string;
-    store_name?: string;
-    date?: string;
-  };
+type DownloadableReceipt = {
+  image_path?: string;
+  store_name?: string;
+  date?: string;
+};
 
+const sanitizeFilenamePart = (value: string) => value.replace(/[^\w.-]/g, '_');
+
+export default function ReceiptList() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string|null>(null);
   const [receipts, setReceipts] = useState<any[]>([])
@@ -208,10 +210,10 @@ export default function ReceiptList() {
     }
 
     const pathWithoutQuery = receipt.image_path.split('?')[0];
-    const extension = pathWithoutQuery.split('.').pop()?.toLowerCase() || 'jpg';
-    const normalizedExtension = extension.replace(/[^a-z0-9]/g, '') || 'jpg';
-    const safeDate = String(receipt.date || 'no-date').replace(/[^\w.-]/g, '_');
-    const fileName = `Receipt_${(receipt.store_name || 'Vault').replace(/[^\w.-]/g, '_')}_${safeDate}.${normalizedExtension}`;
+    const normalizedExtension = (pathWithoutQuery.split('.').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg');
+    const safeDate = sanitizeFilenamePart(String(receipt.date || 'no-date'));
+    const safeStoreName = sanitizeFilenamePart(receipt.store_name || 'Vault');
+    const fileName = `Receipt_${safeStoreName}_${safeDate}.${normalizedExtension}`;
 
     try {
       const response = await fetch(receipt.image_path);
