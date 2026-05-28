@@ -8,7 +8,7 @@ ReceiptVault is a full-stack, scalable, and secure expense management platform d
 ## Features
 
 ### Core Features
-- 📷 **Receipt Scanning**: Upload and scan receipts using OCR (Optical Character Recognition)
+- 📷 **Receipt Scanning**: Upload and scan receipts using Google Cloud Document AI Expense Processor
 - 💰 **Expense Tracking**: Automatically extract store name, date, items, prices, and VAT
 - 📊 **Dashboard Analytics**: Visualize spending patterns with charts and graphs
 - 🏷️ **Categorization**: Organize expenses by category (Groceries, Dining, Transport, etc.)
@@ -30,7 +30,8 @@ ReceiptVault is a full-stack, scalable, and secure expense management platform d
 - **Python 3.10+**
 - **Flask** - Web framework
 - **Flask-SQLAlchemy** - ORM for database
-- **Pytesseract** - OCR for receipt scanning
+- **Google Cloud Document AI** - Enterprise receipt intelligence and field extraction
+- **Google Cloud Storage (GCS)** - Secure receipt file storage
 - **PostgreSQL/SQLite** - Database (PostgreSQL recommended for enterprise)
 - **Flask-CORS** - Cross-origin support
 - **Gunicorn**/**uWSGI** - Production WSGI server
@@ -41,7 +42,7 @@ ReceiptVault is a full-stack, scalable, and secure expense management platform d
 - Audit trail and logging (roadmap)
 ### Deployment & Scalability
 - Dockerfile and docker-compose for containerized deployment (recommended for enterprise)
-- Cloud-ready: Deployable on Azure, AWS, GCP, or on-premises
+- Cloud-ready: Deployable on GCP (preferred), Azure, AWS, or on-premises
 - Horizontal scaling with PostgreSQL and stateless backend
 
 ### Frontend
@@ -89,24 +90,22 @@ receiptvault/
 ### Prerequisites
 - Python 3.10 or higher
 - Node.js 18 or higher
-- Tesseract OCR (for receipt scanning)
+- Google Cloud project with Document AI enabled
+- Google Cloud Storage bucket
+- Service account with access to Document AI and GCS
 
-### Installing Tesseract OCR
+### Configuring Google Cloud Document AI & GCS
 
-**Windows:**
-1. Download from: https://github.com/UB-Mannheim/tesseract/wiki
-2. Install and note the installation path (e.g., `C:\Program Files\Tesseract-OCR\tesseract.exe`)
-
-**macOS:**
-```bash
-brew install tesseract
-```
-
-**Linux (Ubuntu/Debian):**
-```bash
-sudo apt-get update
-sudo apt-get install tesseract-ocr
-```
+1. Create or select a GCP project.
+2. Enable **Document AI API** and **Cloud Storage API**.
+3. Create a Document AI Expense processor and copy its processor resource path:
+   `projects/<project-id>/locations/<location>/processors/<processor-id>`
+4. Create a GCS bucket for receipt image storage.
+5. Create a service account with required roles (Document AI + Storage object access).
+6. Export Google credentials before running the backend:
+   ```bash
+   export GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/service-account.json
+   ```
 
 
 ### Backend Setup (Enterprise/Production)
@@ -136,7 +135,8 @@ sudo apt-get install tesseract-ocr
    ```
    Edit `.env` and update:
    - `SECRET_KEY` - Change to a secure random key
-   - `TESSERACT_PATH` - Path to your Tesseract installation (Windows only)
+   - `DOCUMENT_AI_PROCESSOR_ID` - Document AI processor resource name
+   - `GCS_BUCKET_NAME` - Bucket name used for receipt image uploads
    - `DATABASE_URL` - SQLite (default) or PostgreSQL connection string
 
 6. **Run the backend (Development):**
@@ -188,7 +188,7 @@ sudo apt-get install tesseract-ocr
 - Click "Upload Receipt" tab
 - Select or drag-and-drop a receipt image (PNG, JPG, JPEG, or PDF)
 - Click "Upload & Scan Receipt"
-- The app will automatically extract information using OCR
+- The app will automatically extract structured information using Document AI
 
 ### 2. View Receipts
 - Click "My Receipts" to see all uploaded receipts
@@ -282,9 +282,9 @@ npm run build
 ## Troubleshooting
 
 ### OCR Not Working
-- Ensure Tesseract is installed correctly
-- Verify `TESSERACT_PATH` in `.env` (Windows)
-- Test Tesseract: `tesseract --version`
+- Ensure `GOOGLE_APPLICATION_CREDENTIALS` points to a valid service account JSON
+- Verify `DOCUMENT_AI_PROCESSOR_ID` and `GCS_BUCKET_NAME` values in `.env`
+- Confirm Document AI and Cloud Storage APIs are enabled in your GCP project
 
 ### Database Errors
 - Check `DATABASE_URL` in `.env`
@@ -309,6 +309,11 @@ npm run build
 - 🧾 PDF receipt generation
 - 📈 Monthly expense reports
 - 🏢 Integration with UAE e-invoicing/government APIs
+
+## OCR Evolution (Architecture Note)
+
+ReceiptVault initially started with a local **Python + pytesseract** OCR path during early prototyping.  
+The current enterprise architecture is now standardized on **Google Cloud Document AI** for extraction quality and **Google Cloud Storage** for scalable receipt storage, providing a production-ready GCP-aligned pipeline.
 
 ## Contributing
 
