@@ -4,6 +4,14 @@ import ConfirmDialog from './ConfirmDialog';
 import { Store, Trash2, Edit, Eye, Download, Calendar, CreditCard, Search, SlidersHorizontal, Package, X, Plus, MapPin, Phone, Hash, Info } from 'lucide-react';
 import { getReceipts, deleteReceipt, getCategories, updateReceipt, createManualReceipt } from '../services/api';
 
+type DownloadableReceipt = {
+  image_path?: string;
+  store_name?: string;
+  date?: string;
+};
+
+const sanitizeFilenamePart = (value: string) => value.replace(/[^\w.-]/g, '_');
+
 export default function ReceiptList() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string|null>(null);
@@ -194,6 +202,62 @@ export default function ReceiptList() {
   }
 
   const totalSpent = receipts.reduce((sum, r) => sum + parseFloat(r.total_incl_vat), 0);
+
+  const handleDownloadImage = async (receipt: DownloadableReceipt | null) => {
+    if (!receipt?.image_path) {
+      toast.error('No image available for this receipt');
+      return;
+    }
+
+    let safeImageUrl: string;
+    let pathWithoutQuery: string;
+    try {
+      const parsedUrl = new URL(receipt.image_path, window.location.origin);
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+        throw new Error(`Unsupported protocol: ${parsedUrl.protocol}`);
+      }
+      safeImageUrl = parsedUrl.toString();
+      pathWithoutQuery = parsedUrl.pathname;
+    } catch (urlError) {
+      console.error('Invalid receipt image URL:', urlError);
+      toast.error('Receipt image URL is invalid');
+      return;
+    }
+
+    const allowedExtensions = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg']);
+    const extractedExtension = pathWithoutQuery.split('.').pop()?.toLowerCase().replace(/[^a-z]/g, '') || '';
+    const normalizedExtension = allowedExtensions.has(extractedExtension) ? extractedExtension : 'jpg';
+    const safeDate = sanitizeFilenamePart(String(receipt.date || 'no-date'));
+    const safeStoreName = sanitizeFilenamePart(receipt.store_name || 'Vault');
+    const fileName = `Receipt_${safeStoreName}_${safeDate}.${normalizedExtension}`;
+
+    try {
+      const response = await fetch(safeImageUrl);
+      if (!response.ok) {
+        throw new Error(`Image request failed with status ${response.status}`);
+      }
+
+      const blob = await response.blob();
+      const objectUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(objectUrl);
+    } catch (error) {
+      console.error('Receipt image download failed; opening in new tab instead:', error);
+      const fallbackLink = document.createElement('a');
+      fallbackLink.href = safeImageUrl;
+      fallbackLink.target = '_blank';
+      fallbackLink.rel = 'noopener noreferrer';
+      document.body.appendChild(fallbackLink);
+      fallbackLink.click();
+      document.body.removeChild(fallbackLink);
+      toast('Direct download was blocked, so the image was opened in a new tab.', { icon: 'ℹ️' });
+    }
+  };
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
@@ -405,17 +469,7 @@ export default function ReceiptList() {
                         Enlarge Image
                       </a>
                       <button
-                        onClick={async () => {
-                          const response = await fetch(selectedReceipt.image_path);
-                          const blob = await response.blob();
-                          const url = window.URL.createObjectURL(blob);
-                          const a = document.createElement('a');
-                          a.href = url;
-                          a.download = `Receipt_${selectedReceipt.store_name}_${selectedReceipt.date}.jpg`;
-                          document.body.appendChild(a);
-                          a.click();
-                          window.URL.revokeObjectURL(url);
-                        }}
+                        onClick={() => handleDownloadImage(selectedReceipt)}
                         className="absolute bottom-6 left-6 bg-primary-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-xl opacity-0 group-hover:opacity-100 transition-all"
                       >
                         Download Image
@@ -762,4 +816,3 @@ export default function ReceiptList() {
     </div>
   );
 }
-
