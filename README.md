@@ -16,12 +16,13 @@ The business (or the accounting firm, per client) pays a monthly fee per company
 
 ## Features
 
-- **Company workspaces** with owner, accountant and staff roles, invites, and a company switcher for accountants with many clients
+- **Company workspaces** with owner, accountant and staff roles, invites, and a company switcher for accountants with many clients. Invited people sign up with the invited email and leave company name blank to join only that company
 - **Receipt scanning** with Google Cloud Document AI: supplier, TRN, date, line items, VAT, currency (converted to AED)
 - **Manual entry** with live TRN check and one-click 5% VAT calculation
-- **Review workflow**: pending, approved, rejected, with notes. Staff can't change approved receipts
+- **Review workflow**: pending, approved, rejected, with notes. Only owners and accountants review. Staff can't change approved receipts
+- **Only approved receipts count as recoverable VAT**: a receipt's VAT is claimable when it is approved, has a valid supplier TRN, has VAT, and isn't in a blocked category (entertainment). Receipts not yet approved show separately as "Waiting for review"
 - **Supplier TRN check**: receipts without a valid 15-digit TRN are flagged, since their VAT can't be recovered
-- **VAT quarter view**: VAT 201 box 9 figures (standard rated expenses and recoverable VAT), filing due date, a "before you file" checklist, VAT by category, and why VAT was left out (missing TRN, entertainment, rejected)
+- **VAT quarter view**: VAT 201 box 9 figures (standard rated expenses and recoverable VAT), filing due date, a "before you file" checklist, VAT by category, and why VAT was left out (missing TRN, entertainment, rejected, waiting for review)
 - **Accountant export**: CSV with supplier, TRN, net/VAT/gross in AED, claimable flag, issue and review status
 - **UAE business categories**: Fuel & Vehicle, Utilities (DEWA/SEWA), Government & Licensing, Telecom, and more, auto-detected from the supplier name
 - **Demo company**: "Explore a demo Dubai company" creates a private sample workspace with real-looking UAE receipts
