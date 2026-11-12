@@ -1,378 +1,200 @@
 import { useEffect, useState } from 'react'
-import { PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts'
-import { DollarSign, TrendingUp, Receipt, AlertTriangle, Store, Zap, Calendar, ArrowRight, RefreshCcw, ShieldCheck } from 'lucide-react'
-import { getExpenseSummary, getDailyTrends, getBudgetAlerts, getTopStores, getSubscriptions, getSpendingForecast, exportExpenses } from '../services/api'
-import toast from 'react-hot-toast'
+import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { AlertTriangle, ArrowRight, CalendarClock, CheckCircle2, ClipboardCheck, Loader2, ScanLine, Store } from 'lucide-react'
+import { getExpenseTrends, getTopStores, getVatSummary } from '../services/api'
+import { aed, daysUntil, shortDate } from '../lib/format'
+import type { Company, VatSummary } from '../lib/types'
+import type { Tab } from '../App'
+import type { ReceiptFilter } from './ReceiptList'
 
-const COLORS = ['#0ea5e9', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#ef4444', '#6366f1', '#14b8a6']
+interface Trend { month: string; total_spent: number; vat: number; claimable_vat: number }
+interface TopStore { store_name: string; visit_count: number; total_spent: number }
 
-export default function Dashboard() {
-  const [summary, setSummary] = useState<any>(null)
-  const [dailyTrends, setDailyTrends] = useState<any[]>([])
-  const [alerts, setAlerts] = useState<any[]>([])
-  const [topStores, setTopStores] = useState<any[]>([])
-  const [subscriptions, setSubscriptions] = useState<any[]>([])
-  const [forecast, setForecast] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
-  const [isDark, setIsDark] = useState(false)
+const monthLabel = (key: string) => new Date(`${key}-01T00:00:00`).toLocaleDateString('en-GB', { month: 'short' })
 
-  useEffect(() => {
-    loadDashboardData()
-    // Check if dark mode is active
-    const checkDark = () => {
-      setIsDark(document.documentElement.classList.contains('dark'))
-    }
-    checkDark()
-    
-    // Watch for class changes on documentElement
-    const observer = new MutationObserver(checkDark)
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
-    return () => observer.disconnect()
-  }, [])
-
-  const loadDashboardData = async () => {
-    try {
-      setLoading(true)
-      const currentDate = new Date()
-      const month = currentDate.getMonth() + 1
-      const year = currentDate.getFullYear()
-      
-      const [summaryData, dailyTrendsData, alertsData, storesData, subsData, forecastData] = await Promise.all([
-        getExpenseSummary({ 
-          period: 'month', 
-          year, 
-          month 
-        }),
-        getDailyTrends(month, year),
-        getBudgetAlerts(month, year),
-        getTopStores(5),
-        getSubscriptions(),
-        getSpendingForecast()
-      ])
-      
-      setSummary(summaryData)
-      setDailyTrends(dailyTrendsData.trends || [])
-      setAlerts(alertsData.alerts || [])
-      setTopStores(storesData.top_stores || [])
-      setSubscriptions(subsData.subscriptions || [])
-      setForecast(forecastData)
-    } catch (error) {
-      console.error('Error loading dashboard:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleVATExport = async () => {
-    try {
-      const data = await exportExpenses();
-      // Data is already CSV string from backend
-      const blob = new Blob([data as any], { type: 'text/csv' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `FTA_VAT_Export_${new Date().toISOString().split('T')[0]}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      toast.success('VAT Export generated for FTA compliance');
-    } catch (error) {
-      toast.error('Failed to generate VAT export');
-    }
-  }
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
-      </div>
-    )
-  }
-
-  const categoryData = summary?.category_breakdown 
-    ? Object.entries(summary.category_breakdown).map(([name, value]) => ({
-        name,
-        value: Number(value)
-      }))
-    : []
-
-  const daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
-  const currentDay = new Date().getDate();
-  const dailyAverage = summary?.total_spent ? (summary.total_spent / currentDay) : 0;
-  const projectedSpend = dailyAverage * daysInMonth;
-
+function Stat({ label, value, hint, tone = 'default' }: { label: string; value: string; hint?: string; tone?: 'default' | 'gold' | 'warn' }) {
+  const styles = {
+    default: 'card',
+    gold: 'rounded-2xl border border-gold-300 bg-gradient-to-br from-gold-50 to-white shadow-card',
+    warn: 'rounded-2xl border border-clay-100 bg-clay-50/60 shadow-card',
+  }[tone]
   return (
-    <div className="w-full max-w-screen-lg mx-auto px-2 space-y-6">
-      {/* Header with quick stats */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-2">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Financial Insights</h2>
-          <p className="text-gray-500 dark:text-gray-400">Track your spending habits across the UAE</p>
-        </div>
-        <div className="flex items-center space-x-3">
-          <button 
-            onClick={handleVATExport}
-            className="flex items-center space-x-2 bg-primary-600 text-white px-5 py-2.5 rounded-xl shadow-lg shadow-primary-200 dark:shadow-none font-bold text-xs uppercase tracking-widest hover:bg-primary-700 transition-all"
-          >
-            <ShieldCheck className="w-4 h-4" />
-            <span>FTA VAT Export</span>
-          </button>
-          <div className="flex items-center space-x-2 bg-white dark:bg-gray-900 px-4 py-2 rounded-xl shadow-sm border border-gray-100 dark:border-gray-800">
-            <Calendar className="w-4 h-4 text-primary-600" />
-            <span className="text-sm font-bold text-gray-700 dark:text-gray-200">
-              {new Date().toLocaleString('default', { month: 'long', year: 'numeric' })}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Alerts */}
-      {alerts.length > 0 && (
-        <div className="bg-red-50 dark:bg-red-950/20 border-l-4 border-red-500 rounded-2xl shadow-sm p-4 animate-in slide-in-from-top duration-300">
-          <div className="flex items-center">
-            <div className="bg-red-100 dark:bg-red-900/40 p-2 rounded-xl mr-4">
-              <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-400" />
-            </div>
-            <div>
-              <h3 className="text-sm font-bold text-red-800 dark:text-red-200">Budget Warning</h3>
-              <div className="mt-1 text-sm text-red-700 dark:text-red-300 space-y-1">
-                {alerts.map((alert, idx) => (
-                  <div key={idx} className="flex items-center">
-                    <span className="w-1.5 h-1.5 bg-red-400 rounded-full mr-2"></span>
-                    {alert.message}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-        {[
-          { label: 'Total Spent', value: summary?.total_spent?.toFixed(2) || '0.00', unit: 'AED', icon: DollarSign, color: 'text-gray-900 dark:text-white', bg: 'bg-green-50 dark:bg-green-950/30', text: 'text-green-600 dark:text-green-400', sub: 'Current Month' },
-          { label: 'Forecasted', value: forecast?.projected_total?.toFixed(0) || '0', unit: 'AED', icon: TrendingUp, color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-50 dark:bg-blue-950/30', text: 'text-blue-600 dark:text-blue-400', sub: 'EO Month Predict' },
-          { label: 'Receipts', value: summary?.receipt_count || 0, unit: '', icon: Receipt, color: 'text-gray-900 dark:text-white', bg: 'bg-purple-50 dark:bg-purple-950/30', text: 'text-purple-600 dark:text-purple-400', sub: 'Transactions' },
-          { label: 'VAT Paid', value: summary?.total_vat?.toFixed(2) || '0.00', unit: 'AED', icon: Store, color: 'text-orange-600 dark:text-orange-400', bg: 'bg-orange-50 dark:bg-orange-950/30', text: 'text-orange-600 dark:text-orange-400', sub: 'Tax Tracking' }
-        ].map((card, i) => (
-          <div key={i} className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 p-5 hover:shadow-md transition-all">
-            <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-1">{card.label}</p>
-            <p className={`text-2xl font-black ${card.color}`}>
-              {card.value} <span className="text-xs font-normal text-gray-500">{card.unit}</span>
-            </p>
-            <div className={`mt-4 flex items-center text-[10px] font-black uppercase tracking-tighter ${card.bg} ${card.text} px-2 py-1 rounded-lg w-fit`}>
-              <card.icon className="w-3 h-3 mr-1" />
-              {card.sub}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main Spending Trend */}
-        <div className="lg:col-span-2 bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-bold text-gray-900 dark:text-white">Daily Spending</h3>
-            <div className="text-xs font-bold text-gray-400 uppercase tracking-widest bg-gray-50 dark:bg-gray-800 px-3 py-1 rounded-lg">Current Month</div>
-          </div>
-          {dailyTrends.length > 0 ? (
-            <div className="w-full h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={dailyTrends}>
-                  <defs>
-                    <linearGradient id="colorSpent" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? "#1e293b" : "#f1f5f9"} />
-                  <XAxis 
-                    dataKey="day" 
-                    axisLine={false} 
-                    tickLine={false} 
-                    tick={{fill: isDark ? '#64748b' : '#94a3b8', fontSize: 10, fontWeight: 700}}
-                    dy={10}
-                    label={{ value: 'Day of Month', position: 'insideBottom', offset: -5, fill: isDark ? '#64748b' : '#94a3b8', fontSize: 10, fontWeight: 800 }}
-                  />
-                  <YAxis 
-                    axisLine={false} 
-                    tickLine={false} 
-                    tick={{fill: isDark ? '#64748b' : '#94a3b8', fontSize: 10, fontWeight: 700}}
-                  />
-                  <Tooltip 
-                    contentStyle={{
-                      backgroundColor: isDark ? '#0f172a' : '#fff',
-                      borderRadius: '16px',
-                      border: 'none',
-                      boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)',
-                      color: isDark ? '#fff' : '#000'
-                    }}
-                  />
-                  <Area 
-                    type="monotone" 
-                    dataKey="total_spent" 
-                    stroke="#0ea5e9" 
-                    strokeWidth={4}
-                    fillOpacity={1} 
-                    fill="url(#colorSpent)" 
-                    name="Spent (AED)" 
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          ) : (
-            <div className="flex items-center justify-center h-80 text-gray-400 font-bold uppercase tracking-widest text-xs">
-              Insufficient data for trends
-            </div>
-          )}
-        </div>
-
-        {/* Merchant Leaderboard */}
-        <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 p-6">
-          <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-6">Top Merchants</h3>
-          <div className="space-y-5">
-            {topStores.length > 0 ? topStores.map((store, idx) => (
-              <div key={idx} className="flex items-center justify-between group cursor-default">
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-gray-50 dark:bg-gray-800 rounded-xl flex items-center justify-center border border-gray-100 dark:border-gray-700 group-hover:bg-primary-50 dark:group-hover:bg-primary-900/20 transition-colors">
-                    <Store className="w-5 h-5 text-gray-400 dark:text-gray-500 group-hover:text-primary-600" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-bold text-gray-900 dark:text-white leading-tight">{store.store_name}</p>
-                    <p className="text-[10px] text-gray-500 font-black uppercase tracking-tighter">{store.visit_count} visits</p>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm font-black text-gray-900 dark:text-white">{store.total_spent.toFixed(0)} <span className="text-[10px] font-normal opacity-50">AED</span></p>
-                  <div className="w-16 h-1.5 bg-gray-100 dark:bg-gray-800 rounded-full mt-1.5 overflow-hidden">
-                    <div 
-                      className="h-full bg-primary-500 rounded-full" 
-                      style={{ width: `${(store.total_spent / topStores[0].total_spent) * 100}%` }}
-                    ></div>
-                  </div>
-                </div>
-              </div>
-            )) : (
-              <p className="text-center text-gray-400 py-10 text-xs font-bold uppercase tracking-widest">No merchants recorded</p>
-            )}
-          </div>
-          <button className="w-full mt-8 py-3 bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center justify-center space-x-2">
-            <span>View All Merchants</span>
-            <ArrowRight className="w-3 h-3" />
-          </button>
-        </div>
-      </div>
-
-      {/* Subscriptions Tracker */}
-      {subscriptions.length > 0 && (
-        <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-bold text-gray-900 dark:text-white">Detected Subscriptions</h3>
-            <div className="bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest">Auto-Detected</div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {subscriptions.map((sub, idx) => (
-              <div key={idx} className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-2xl border dark:border-gray-700 flex items-center space-x-4">
-                <div className="p-3 bg-white dark:bg-gray-800 rounded-xl shadow-sm">
-                  <RefreshCcw className="w-5 h-5 text-primary-600" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-gray-900 dark:text-white truncate">{sub.merchant}</p>
-                  <p className="text-[10px] text-gray-500 font-black uppercase tracking-widest mt-0.5">{sub.avg_amount.toFixed(0)} AED / {sub.frequency}</p>
-                  <p className="text-[9px] text-primary-500 font-bold mt-1">Next: {new Date(sub.next_predicted).toLocaleDateString()}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Category Breakdown */}
-        <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 p-6">
-          <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-6">Spending by Category</h3>
-          {categoryData.length > 0 ? (
-            <div className="w-full h-80 flex flex-col sm:row items-center">
-              <div className="w-full sm:w-1/2 h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={categoryData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={60}
-                      outerRadius={80}
-                      paddingAngle={8}
-                      dataKey="value"
-                    >
-                      {categoryData.map((_, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} stroke="none" />
-                      ))}
-                    </Pie>
-                    <Tooltip 
-                      contentStyle={{
-                        backgroundColor: isDark ? '#0f172a' : '#fff',
-                        borderRadius: '16px',
-                        border: 'none',
-                        boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)',
-                        color: isDark ? '#fff' : '#000'
-                      }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="w-full sm:w-1/2 space-y-3 mt-4 sm:mt-0 sm:pl-6">
-                {categoryData.slice(0, 5).map((entry, index) => (
-                  <div key={entry.name} className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }}></div>
-                      <span className="text-xs font-bold text-gray-600 dark:text-gray-400 truncate max-w-[120px]">{entry.name}</span>
-                    </div>
-                    <span className="text-xs font-black text-gray-900 dark:text-white">{((entry.value / summary.total_spent) * 100).toFixed(0)}%</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="flex items-center justify-center h-80 text-gray-400 font-bold uppercase tracking-widest text-xs">
-              No categories detected
-            </div>
-          )}
-        </div>
-
-        {/* Prediction & Projection */}
-        <div className="bg-primary-600 dark:bg-primary-700 rounded-3xl shadow-xl p-8 text-white flex flex-col justify-between relative overflow-hidden">
-          <div className="absolute top-0 right-0 p-8 opacity-10">
-            <TrendingUp className="w-32 h-32" />
-          </div>
-          <div className="relative z-10">
-            <div className="flex items-center space-x-2 mb-6">
-              <Zap className="w-6 h-6 text-yellow-300 fill-yellow-300" />
-              <h3 className="text-xl font-black uppercase tracking-tight">Projections</h3>
-            </div>
-            <p className="text-primary-100 text-sm font-medium leading-relaxed mb-8">
-              Based on your current speed of <span className="text-white font-black underline decoration-yellow-300 underline-offset-4">{dailyAverage.toFixed(2)} AED/day</span>, 
-              you'll likely end the month at:
-            </p>
-            <div className="flex items-baseline space-x-2">
-              <span className="text-6xl font-black tracking-tighter">{projectedSpend.toFixed(0)}</span>
-              <span className="text-xl font-bold text-primary-200 uppercase tracking-widest">AED</span>
-            </div>
-          </div>
-          
-          <div className="mt-12 bg-white/10 dark:bg-black/20 backdrop-blur-xl rounded-2xl p-5 border border-white/20 relative z-10">
-            <p className="text-[10px] font-black uppercase tracking-widest text-primary-200 mb-2">Smart Status</p>
-            <p className="text-sm font-bold leading-snug">
-              {projectedSpend > 5000 
-                ? "⚠️ Higher than average spending. Your Shopping category is 20% above normal."
-                : "✅ You're on track to stay under budget. Great discipline this month!"}
-            </p>
-          </div>
-        </div>
-      </div>
+    <div className={`${styles} p-5`}>
+      <div className="text-xs font-semibold uppercase tracking-wider text-night-400">{label}</div>
+      <div className={`mt-2 font-display text-2xl font-semibold ${tone === 'gold' ? 'text-gold-700' : tone === 'warn' ? 'text-clay-700' : 'text-night-900'}`}>{value}</div>
+      {hint && <div className="mt-1 text-xs text-night-500">{hint}</div>}
     </div>
   )
 }
 
+export default function Dashboard({ company, onNavigate }: { company: Company; onNavigate: (tab: Tab, filter?: ReceiptFilter) => void }) {
+  const [summary, setSummary] = useState<VatSummary | null>(null)
+  const [trends, setTrends] = useState<Trend[]>([])
+  const [stores, setStores] = useState<TopStore[]>([])
+  const [error, setError] = useState(false)
 
+  useEffect(() => {
+    Promise.all([getVatSummary(), getExpenseTrends(6), getTopStores(5)])
+      .then(([s, t, st]) => { setSummary(s); setTrends(t.trends); setStores(st.top_stores) })
+      .catch(() => setError(true))
+  }, [])
+
+  if (error) return <div className="card p-8 text-center text-night-500">Couldn't load your overview. Please refresh.</div>
+  if (!summary) return <div className="flex justify-center py-24"><Loader2 className="h-6 w-6 animate-spin text-gold-500" /></div>
+
+  const days = daysUntil(summary.period.due_date)
+  const missingTrn = summary.issues.find((i) => i.type === 'missing_trn')
+  const pendingVat = summary.issues.find((i) => i.type === 'pending_review')?.vat ?? 0
+  const lost = Math.max(0, summary.totals.vat - summary.claimable.vat - pendingVat)
+  const maxCat = Math.max(1, ...summary.by_category.map((c) => c.net + c.vat))
+  const isEmpty = summary.totals.count === 0 && summary.pending_review === 0
+
+  return (
+    <div className="space-y-6 fade-in">
+      <section className="relative overflow-hidden rounded-3xl bg-night-950 p-6 text-white sm:p-8">
+        <div className="pattern-mashrabiya absolute inset-0 opacity-[0.08]" />
+        <div className="absolute -right-16 -top-16 h-64 w-64 rounded-full bg-gold-400/20 blur-3xl" />
+        <div className="relative grid gap-6 md:grid-cols-[1.4fr_1fr] md:items-end">
+          <div>
+            <p className="eyebrow text-gold-300">VAT quarter · {summary.period.label}</p>
+            <div className="mt-3 text-sm text-night-200">Recoverable input VAT so far</div>
+            <div className="mt-1 font-display text-5xl font-semibold text-gold-200">{aed(summary.claimable.vat)}</div>
+            <div className="mt-2 text-sm text-night-200">
+              from {summary.claimable.count} of {summary.totals.count} receipts · {company.name}
+            </div>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur">
+            <div className="flex items-center gap-2 text-sm font-semibold text-gold-200">
+              <CalendarClock className="h-4 w-4" /> Return due {shortDate(summary.period.due_date)}
+            </div>
+            <div className="mt-1 text-xs text-night-200">
+              {days >= 0 ? `${days} days left to file with the FTA` : `${-days} days past the filing date`}
+            </div>
+            <button onClick={() => onNavigate('vat')} className="btn-gold mt-4 w-full">
+              Open VAT return <ArrowRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {isEmpty ? (
+        <section className="card flex flex-col items-center px-6 py-14 text-center">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gold-50"><ScanLine className="h-7 w-7 text-gold-600" /></div>
+          <h3 className="mt-4 font-display text-xl font-semibold">Add your first receipt</h3>
+          <p className="mt-1 max-w-sm text-sm text-night-500">Snap a fuel, DEWA or supplier receipt. We'll read the TRN and VAT and file it into this quarter.</p>
+          <button onClick={() => onNavigate('scan')} className="btn-primary mt-5">Add receipt</button>
+        </section>
+      ) : (
+        <>
+          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <Stat label="Spend this quarter" value={aed(summary.totals.gross, 0)} hint={`${summary.totals.count} receipts incl. VAT`} />
+            <Stat label="Input VAT paid" value={aed(summary.totals.vat)} hint="5% VAT on your purchases" />
+            <Stat label="Recoverable VAT" value={aed(summary.claimable.vat)} hint={pendingVat ? `Approved only · ${aed(pendingVat)} more waiting for review` : 'Approved, with a valid supplier TRN'} tone="gold" />
+            <Stat label="At risk" value={aed(lost)} hint="VAT you may not be able to claim" tone={lost > 0 ? 'warn' : 'default'} />
+          </section>
+
+          <section className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
+            <div className="card p-5">
+              <div className="flex items-baseline justify-between">
+                <h3 className="font-display text-lg font-semibold">Spend &amp; recoverable VAT</h3>
+                <span className="text-xs text-night-400">Last 6 months</span>
+              </div>
+              <div className="mt-4 h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={trends.map((t) => ({ ...t, label: monthLabel(t.month) }))}>
+                    <CartesianGrid stroke="#ece3d1" vertical={false} />
+                    <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={12} stroke="#56779c" />
+                    <YAxis yAxisId="spend" tickLine={false} axisLine={false} fontSize={12} stroke="#56779c" width={52} tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
+                    <YAxis yAxisId="vat" orientation="right" tickLine={false} axisLine={false} fontSize={12} stroke="#a17424" width={40} />
+                    <Tooltip
+                      formatter={(value: number, name: string) => [aed(value), name === 'total_spent' ? 'Spend' : 'Recoverable VAT']}
+                      contentStyle={{ borderRadius: 12, border: '1px solid #ece3d1' }}
+                    />
+                    <Bar yAxisId="spend" dataKey="total_spent" fill="#12253c" radius={[6, 6, 0, 0]} maxBarSize={36} isAnimationActive={false} />
+                    <Line yAxisId="vat" dataKey="claimable_vat" stroke="#d4a845" strokeWidth={3} dot={{ r: 4, fill: '#d4a845' }} isAnimationActive={false} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            <div className="card p-5">
+              <h3 className="font-display text-lg font-semibold">Needs attention</h3>
+              <div className="mt-4 space-y-3">
+                {summary.pending_review > 0 && (
+                  <button onClick={() => onNavigate('receipts', { status: 'pending' })} className="flex w-full items-center gap-3 rounded-xl border border-sand-200 p-3 text-left hover:bg-sand-50">
+                    <ClipboardCheck className="h-5 w-5 text-night-500" />
+                    <div className="flex-1">
+                      <div className="text-sm font-semibold">{summary.pending_review} waiting for review</div>
+                      <div className="text-xs text-night-500">Owner or accountant approves them</div>
+                    </div>
+                    <ArrowRight className="h-4 w-4 text-night-300" />
+                  </button>
+                )}
+                {missingTrn && (
+                  <button onClick={() => onNavigate('receipts', { issue: 'missing_trn' })} className="flex w-full items-center gap-3 rounded-xl border border-clay-100 bg-clay-50/50 p-3 text-left hover:bg-clay-50">
+                    <AlertTriangle className="h-5 w-5 text-clay-600" />
+                    <div className="flex-1">
+                      <div className="text-sm font-semibold">{missingTrn.count} without a supplier TRN</div>
+                      <div className="text-xs text-night-500">{aed(missingTrn.vat)} VAT can't be claimed until fixed</div>
+                    </div>
+                    <ArrowRight className="h-4 w-4 text-night-300" />
+                  </button>
+                )}
+                {summary.issues.filter((i) => i.type === 'blocked_category').map((i) => (
+                  <div key={i.type} className="flex items-center gap-3 rounded-xl border border-sand-200 p-3">
+                    <AlertTriangle className="h-5 w-5 text-gold-600" />
+                    <div>
+                      <div className="text-sm font-semibold">{i.count} entertainment receipt{i.count > 1 ? 's' : ''}</div>
+                      <div className="text-xs text-night-500">{aed(i.vat)} VAT is usually blocked from recovery</div>
+                    </div>
+                  </div>
+                ))}
+                {summary.pending_review === 0 && summary.issues.length === 0 && (
+                  <div className="flex items-center gap-3 rounded-xl bg-palm-50 p-3 text-sm text-palm-700">
+                    <CheckCircle2 className="h-5 w-5" /> All clear. This quarter is ready for your accountant.
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+
+          <section className="grid gap-6 lg:grid-cols-2">
+            <div className="card p-5">
+              <h3 className="font-display text-lg font-semibold">Where the money went</h3>
+              <div className="mt-4 space-y-3.5">
+                {summary.by_category.slice(0, 6).map((c) => (
+                  <div key={c.category}>
+                    <div className="flex justify-between text-sm">
+                      <span className="font-medium">{c.category}</span>
+                      <span className="text-night-500">{aed(c.net + c.vat, 0)}</span>
+                    </div>
+                    <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-sand-200">
+                      <div className="h-full rounded-full bg-gradient-to-r from-night-700 to-night-500" style={{ width: `${((c.net + c.vat) / maxCat) * 100}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="card p-5">
+              <h3 className="font-display text-lg font-semibold">Top suppliers</h3>
+              <div className="mt-3 divide-y divide-sand-200">
+                {stores.map((s, i) => (
+                  <div key={s.store_name} className="flex items-center gap-3 py-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-sand-100 text-sm font-semibold text-night-600">
+                      {i === 0 ? <Store className="h-4 w-4 text-gold-600" /> : i + 1}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-semibold">{s.store_name}</div>
+                      <div className="text-xs text-night-500">{s.visit_count} receipts</div>
+                    </div>
+                    <div className="text-sm font-semibold">{aed(s.total_spent, 0)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        </>
+      )}
+    </div>
+  )
+}

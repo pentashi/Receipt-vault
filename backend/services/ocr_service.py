@@ -8,11 +8,11 @@ class OCRService:
     """Service for extracting text from receipt images using Google Cloud Document AI"""
     
     def __init__(self, processor_id=None):
-        self.processor_id = processor_id or os.getenv(
-            'DOCUMENT_AI_PROCESSOR_ID', 
-            'projects/210041012141/locations/us/processors/b57c05dfadd5de1d'
-        )
-        print(f"OCRService initialized with processor: {self.processor_id}")
+        self.processor_id = processor_id or os.getenv('DOCUMENT_AI_PROCESSOR_ID', '')
+
+    @property
+    def available(self):
+        return bool(self.processor_id)
         
     def _get_document_ai_result(self, image_path):
         """Process image with Document AI Expense Processor"""

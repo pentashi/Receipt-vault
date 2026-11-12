@@ -1,765 +1,297 @@
-import { useEffect, useState } from 'react';
-import toast from 'react-hot-toast';
-import ConfirmDialog from './ConfirmDialog';
-import { Store, Trash2, Edit, Eye, Download, Calendar, CreditCard, Search, SlidersHorizontal, Package, X, Plus, MapPin, Phone, Hash, Info } from 'lucide-react';
-import { getReceipts, deleteReceipt, getCategories, updateReceipt, createManualReceipt } from '../services/api';
+import { useCallback, useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
+import toast from 'react-hot-toast'
+import { AlertTriangle, Check, CheckCircle2, ExternalLink, FileText, Loader2, RotateCcw, Search, Trash2, X, XCircle } from 'lucide-react'
+import { deleteReceipt, fileUrl, getCategories, getReceipts, reviewReceipt, updateReceipt } from '../services/api'
+import { aed, errorMessage, formatTrn, ISSUE_LABELS, isValidTrn, shortDate } from '../lib/format'
+import type { Receipt, ReviewStatus, Role } from '../lib/types'
+import ConfirmDialog from './ConfirmDialog'
 
-export default function ReceiptList() {
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [pendingDeleteId, setPendingDeleteId] = useState<string|null>(null);
-  const [receipts, setReceipts] = useState<any[]>([])
-  const [categories, setCategories] = useState<string[]>([])
-  const [loading, setLoading] = useState(true)
-  const [showManualModal, setShowManualModal] = useState(false)
-  const [filters, setFilters] = useState({
-    store_name: '',
-    item_name: '',
-    category: '',
-    start_date: '',
-    end_date: ''
-  })
-  const [selectedReceipt, setSelectedReceipt] = useState<any>(null)
-  const [editingReceipt, setEditingReceipt] = useState<any>(null)
-  
-  const [manualForm, setManualForm] = useState({
-    store_name: '',
-    category: 'Other',
-    date: new Date().toISOString().split('T')[0],
-    total_incl_vat: '',
-    vat_amount: '',
-    payment_method: 'Cash',
-    notes: ''
-  })
-
-  const [editForm, setEditForm] = useState({
-    store_name: '',
-    category: '',
-    date: '',
-    total_incl_vat: '',
-    vat_amount: '',
-    payment_method: ''
-  })
-
-  useEffect(() => {
-    loadData()
-  }, [])
-
-  // Fix: Improved search logic - debounce search for store_name and item_name
-  useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      applyFilters();
-    }, 400);
-    return () => clearTimeout(timeoutId);
-  }, [filters.store_name, filters.item_name]);
-
-  // Apply other filters immediately
-  useEffect(() => {
-    applyFilters();
-  }, [filters.category, filters.start_date, filters.end_date]);
-
-  const handleExport = () => {
-    if (!receipts || receipts.length === 0) {
-      toast.error('No receipts to export.');
-      return;
-    }
-    const headers = ['Store Name', 'Category', 'Date', 'Total (AED)', 'VAT (AED)', 'Payment Method', 'Items'];
-    const rows = receipts.map(r => [
-      r.store_name, r.category, r.date, r.total_incl_vat, r.vat_amount, r.payment_method || '',
-      r.items && r.items.length > 0 ? r.items.map((i: any) => `${i.item_name} (${i.price})`).join('; ') : ''
-    ]);
-    const csvContent = [headers, ...rows]
-      .map(e => e.map(x => `"${String(x).replace(/"/g, '""')}"`).join(','))
-      .join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `ReceiptVault_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  };
-
-  const loadData = async () => {
-    try {
-      setLoading(true)
-      
-      // Load categories first for dropdowns
-      try {
-        const categoriesData = await getCategories();
-        setCategories(categoriesData.categories || []);
-      } catch (catErr) {
-        console.error('Failed to load categories:', catErr);
-      }
-
-      // Then load receipts
-      try {
-        const receiptsData = await getReceipts();
-        setReceipts(receiptsData.receipts || []);
-      } catch (recErr) {
-        console.error('Failed to load receipts:', recErr);
-        toast.error('Could not retrieve receipt records');
-      }
-    } catch (error) {
-      console.error('General error loading record data:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleFilterChange = (key: string, value: string) => {
-    setFilters(prev => ({ ...prev, [key]: value }))
-  }
-
-  const applyFilters = async () => {
-    try {
-      setLoading(true)
-      const activeFilters = Object.fromEntries(
-        Object.entries(filters).filter(([_, value]) => value !== '')
-      )
-      const data = await getReceipts(activeFilters)
-      setReceipts(data.receipts || [])
-    } catch (error) {
-      console.error('Error applying filters:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleDelete = (receiptId: string) => {
-    setPendingDeleteId(receiptId);
-    setConfirmOpen(true);
-  }
-
-  const confirmDelete = async () => {
-    if (!pendingDeleteId) return;
-    try {
-      await deleteReceipt(pendingDeleteId);
-      setReceipts(receipts.filter(r => r.receipt_id !== pendingDeleteId));
-      toast.success('Record deleted');
-    } catch (error) {
-      toast.error('Deletion failed');
-    } finally {
-      setConfirmOpen(false);
-      setPendingDeleteId(null);
-    }
-  }
-
-  const handleEdit = (receipt: any) => {
-    setEditingReceipt(receipt)
-    setEditForm({
-      store_name: receipt.store_name,
-      category: receipt.category,
-      date: receipt.date,
-      total_incl_vat: receipt.total_incl_vat.toString(),
-      vat_amount: receipt.vat_amount.toString(),
-      payment_method: receipt.payment_method || ''
-    })
-  }
-
-  const handleSaveEdit = async () => {
-    if (!editingReceipt) return;
-    try {
-      const response = await updateReceipt(editingReceipt.receipt_id, editForm);
-      setReceipts(receipts.map(r =>
-        r.receipt_id === editingReceipt.receipt_id ? response.receipt : r
-      ));
-      setEditingReceipt(null);
-      toast.success('Receipt corrected');
-    } catch (error) {
-      toast.error('Update failed');
-    }
-  }
-
-  const handleManualSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const response = await createManualReceipt(manualForm);
-      setReceipts([response.receipt, ...receipts]);
-      setShowManualModal(false);
-      setManualForm({
-        store_name: '',
-        category: 'Other',
-        date: new Date().toISOString().split('T')[0],
-        total_incl_vat: '',
-        vat_amount: '',
-        payment_method: 'Cash',
-        notes: ''
-      });
-      toast.success('Manual entry added to vault');
-    } catch (error) {
-      toast.error('Failed to add manual entry');
-    }
-  }
-
-  const totalSpent = receipts.reduce((sum, r) => sum + parseFloat(r.total_incl_vat), 0);
-
-  return (
-    <div className="space-y-8 animate-in fade-in duration-500">
-      {/* Mini Stats & Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-        <div>
-          <h2 className="text-3xl font-black text-gray-900 dark:text-white uppercase tracking-tight">Vault Records</h2>
-          <p className="text-gray-500 dark:text-gray-400 font-bold uppercase tracking-widest text-xs mt-1">Transaction History</p>
-        </div>
-        <div className="flex items-center space-x-4">
-          <div className="bg-white dark:bg-gray-900 px-6 py-3 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800">
-            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Total Vault Value</p>
-            <p className="text-xl font-black text-gray-900 dark:text-white">{totalSpent.toLocaleString()} <span className="text-xs font-normal opacity-50">AED</span></p>
-          </div>
-          <button
-            onClick={() => setShowManualModal(true)}
-            className="flex items-center space-x-2 px-6 py-4 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-2xl hover:opacity-90 transition-all font-black uppercase tracking-widest text-[10px]"
-          >
-            <Plus className="w-4 h-4" />
-            <span className="hidden sm:inline">Add Manual</span>
-          </button>
-          <button
-            onClick={handleExport}
-            className="p-4 bg-primary-600 text-white rounded-2xl hover:bg-primary-700 shadow-xl shadow-primary-200 dark:shadow-none transition-all active:scale-95"
-            title="Export to CSV"
-          >
-            <Download className="w-5 h-5" />
-          </button>
-        </div>
-      </div>
-      
-      {/* Search & Filters */}
-      <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-800 p-6">
-        <div className="flex flex-col md:flex-row md:items-center gap-4 mb-6">
-          <div className="relative flex-[2]">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input
-              type="text"
-              value={filters.store_name}
-              onChange={(e) => handleFilterChange('store_name', e.target.value)}
-              placeholder="Search merchants..."
-              className="w-full pl-11 pr-4 py-4 bg-gray-50 dark:bg-gray-800 border-none rounded-2xl focus:ring-2 focus:ring-primary-500 outline-none text-gray-900 dark:text-white font-bold"
-            />
-          </div>
-          <div className="relative flex-1">
-            <Package className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input
-              type="text"
-              value={filters.item_name}
-              onChange={(e) => handleFilterChange('item_name', e.target.value)}
-              placeholder="Search items..."
-              className="w-full pl-11 pr-4 py-4 bg-gray-50 dark:bg-gray-800 border-none rounded-2xl focus:ring-2 focus:ring-primary-500 outline-none text-gray-900 dark:text-white font-bold"
-            />
-          </div>
-          <button className="p-4 bg-gray-50 dark:bg-gray-800 text-gray-400 rounded-2xl hover:bg-gray-100 transition-colors">
-            <SlidersHorizontal className="w-5 h-5" />
-          </button>
-        </div>
-        
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <select
-            value={filters.category}
-            onChange={(e) => handleFilterChange('category', e.target.value)}
-            className="px-4 py-3 bg-gray-50 dark:bg-gray-800 border-none rounded-xl focus:ring-2 focus:ring-primary-500 outline-none text-gray-900 dark:text-white font-bold text-sm"
-          >
-            <option value="">All Categories</option>
-            {categories.map(cat => (
-              <option key={cat} value={cat}>{cat}</option>
-            ))}
-          </select>
-          
-          <input
-            type="date"
-            value={filters.start_date}
-            onChange={(e) => handleFilterChange('start_date', e.target.value)}
-            className="px-4 py-3 bg-gray-50 dark:bg-gray-800 border-none rounded-xl focus:ring-2 focus:ring-primary-500 outline-none text-gray-900 dark:text-white font-bold text-sm"
-          />
-          
-          <input
-            type="date"
-            value={filters.end_date}
-            onChange={(e) => handleFilterChange('end_date', e.target.value)}
-            className="px-4 py-3 bg-gray-50 dark:bg-gray-800 border-none rounded-xl focus:ring-2 focus:ring-primary-500 outline-none text-gray-900 dark:text-white font-bold text-sm"
-          />
-        </div>
-      </div>
-
-      {/* Receipts List */}
-      <div className="space-y-4 relative min-h-[200px]">
-        {loading && (
-          <div className="absolute inset-0 bg-white/50 dark:bg-gray-950/50 z-20 backdrop-blur-[1px] flex items-center justify-center rounded-3xl">
-            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary-600"></div>
-          </div>
-        )}
-        
-        {receipts.length === 0 && !loading ? (
-          <div className="bg-white dark:bg-gray-900 rounded-3xl p-20 text-center border-2 border-dashed border-gray-100 dark:border-gray-800">
-            <div className="w-20 h-20 bg-gray-50 dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-6">
-              <Package className="w-10 h-10 text-gray-300 dark:text-gray-600" />
-            </div>
-            <p className="text-gray-500 dark:text-gray-400 font-bold uppercase tracking-widest text-sm">No records match your filters</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-4">
-            {receipts.map((receipt: any) => (
-              <div 
-                key={receipt.receipt_id} 
-                className="bg-white dark:bg-gray-900 rounded-3xl p-6 shadow-sm border border-gray-100 dark:border-gray-800 hover:border-primary-500 dark:hover:border-primary-500 transition-all group"
-              >
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-                  <div className="flex items-center space-x-5">
-                    <div className="w-14 h-14 bg-gray-50 dark:bg-gray-800 rounded-2xl flex items-center justify-center border border-gray-100 dark:border-gray-700 group-hover:bg-primary-50 dark:group-hover:bg-primary-900/20 transition-colors">
-                      <Store className="w-6 h-6 text-gray-400 group-hover:text-primary-600 transition-colors" />
-                    </div>
-                    <div>
-                      <h4 className="font-black text-gray-900 dark:text-white text-lg leading-tight mb-1">{receipt.store_name}</h4>
-                      <div className="flex items-center space-x-3">
-                        <span className="text-[10px] uppercase font-black tracking-widest text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/40 px-2 py-0.5 rounded">
-                          {receipt.category}
-                        </span>
-                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter flex items-center">
-                          <Calendar className="w-3 h-3 mr-1" />
-                          {receipt.date}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center justify-between md:justify-end flex-1 gap-8">
-                    <div className="text-right">
-                      <p className="text-[10px] text-gray-400 uppercase font-black tracking-widest mb-1">Amount</p>
-                      <p className="text-xl font-black text-gray-900 dark:text-white">{receipt.total_incl_vat} <span className="text-xs font-normal opacity-50">AED</span></p>
-                    </div>
-                    <div className="text-right hidden sm:block">
-                      <p className="text-[10px] text-gray-400 uppercase font-black tracking-widest mb-1">Method</p>
-                      <div className="flex items-center justify-end space-x-1 font-bold text-gray-700 dark:text-gray-300">
-                        <CreditCard className="w-3 h-3" />
-                        <span className="text-xs uppercase">{receipt.payment_method || '---'}</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center space-x-1">
-                      <button
-                        onClick={() => setSelectedReceipt(receipt)}
-                        className="p-3 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-xl transition-all"
-                        title="View Details"
-                      >
-                        <Eye className="w-5 h-5" />
-                      </button>
-                      <button
-                        onClick={() => handleEdit(receipt)}
-                        className="p-3 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-xl transition-all"
-                      >
-                        <Edit className="w-5 h-5" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(receipt.receipt_id)}
-                        className="p-3 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-xl transition-all"
-                      >
-                        <Trash2 className="w-5 h-5" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Detail Modal */}
-      {selectedReceipt && (
-        <div className="fixed inset-0 bg-gray-950/80 backdrop-blur-md flex items-center justify-center p-4 z-[100] animate-in fade-in duration-300">
-          <div className="bg-white dark:bg-gray-900 rounded-[2.5rem] shadow-2xl max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col border dark:border-gray-800">
-            <div className="p-8 border-b dark:border-gray-800 flex items-center justify-between bg-white dark:bg-gray-900 sticky top-0 z-10">
-              <div className="flex items-center space-x-4">
-                <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-2xl">
-                  <Package className="w-6 h-6 text-primary-600" />
-                </div>
-                <div>
-                  <h3 className="text-2xl font-black text-gray-900 dark:text-white uppercase tracking-tight">Record View</h3>
-                  <p className="text-[10px] text-gray-500 dark:text-gray-400 font-black uppercase tracking-[0.2em] mt-0.5">VAULT ID: {selectedReceipt.receipt_id.split('-')[0]}</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setSelectedReceipt(null)}
-                className="w-12 h-12 flex items-center justify-center rounded-2xl hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 transition-all"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-            
-            <div className="flex-1 overflow-y-auto">
-              <div className="grid grid-cols-1 lg:grid-cols-2">
-                {/* Image Section */}
-                <div className="p-10 bg-gray-50 dark:bg-gray-950/50 flex items-center justify-center border-r dark:border-gray-800">
-                  {selectedReceipt.image_path ? (
-                    <div className="relative group">
-                      <img 
-                        src={selectedReceipt.image_path}
-                        alt="Receipt"
-                        className="max-w-full h-auto rounded-[2rem] shadow-2xl border-8 border-white dark:border-gray-800"
-                      />
-                      <a 
-                        href={selectedReceipt.image_path} 
-                        target="_blank" 
-                        rel="noreferrer"
-                        className="absolute bottom-6 right-6 bg-white dark:bg-gray-900 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-xl opacity-0 group-hover:opacity-100 transition-all border dark:border-gray-800"
-                      >
-                        Enlarge Image
-                      </a>
-                      <button
-                        onClick={async () => {
-                          const response = await fetch(selectedReceipt.image_path);
-                          const blob = await response.blob();
-                          const url = window.URL.createObjectURL(blob);
-                          const a = document.createElement('a');
-                          a.href = url;
-                          a.download = `Receipt_${selectedReceipt.store_name}_${selectedReceipt.date}.jpg`;
-                          document.body.appendChild(a);
-                          a.click();
-                          window.URL.revokeObjectURL(url);
-                        }}
-                        className="absolute bottom-6 left-6 bg-primary-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-xl opacity-0 group-hover:opacity-100 transition-all"
-                      >
-                        Download Image
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="w-full aspect-[3/4] bg-gray-100 dark:bg-gray-800 rounded-3xl flex items-center justify-center">
-                      <p className="text-gray-400 font-black uppercase tracking-widest">No Digital Image</p>
-                    </div>
-                  )}
-                </div>
-
-                {/* Data Section */}
-                <div className="p-10 space-y-10">
-                  <div className="grid grid-cols-2 gap-8">
-                    <div>
-                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Merchant</p>
-                      <p className="text-xl font-black text-gray-900 dark:text-white">{selectedReceipt.store_name}</p>
-                      {selectedReceipt.address && (
-                        <div className="flex items-start mt-2 text-gray-500 dark:text-gray-400">
-                          <MapPin className="w-3 h-3 mr-1 mt-0.5 flex-shrink-0" />
-                          <p className="text-[10px] font-bold leading-relaxed">{selectedReceipt.address}</p>
-                        </div>
-                      )}
-                      {selectedReceipt.phone_number && (
-                        <div className="flex items-center mt-1 text-gray-500 dark:text-gray-400">
-                          <Phone className="w-3 h-3 mr-1 flex-shrink-0" />
-                          <p className="text-[10px] font-bold">{selectedReceipt.phone_number}</p>
-                        </div>
-                      )}
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Category</p>
-                      <span className="px-3 py-1 bg-primary-50 dark:bg-primary-950 text-primary-600 dark:text-primary-400 rounded-lg text-[10px] font-black uppercase tracking-widest">{selectedReceipt.category}</span>
-                      {selectedReceipt.transaction_trn && (
-                        <div className="mt-3 flex items-center text-gray-500 dark:text-gray-400">
-                          <Hash className="w-3 h-3 mr-1" />
-                          <p className="text-[10px] font-black">TRN: {selectedReceipt.transaction_trn}</p>
-                        </div>
-                      )}
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Transaction Date</p>
-                      <p className="text-sm font-bold text-gray-900 dark:text-white">{selectedReceipt.date} at {selectedReceipt.time || '--:--'}</p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Payment</p>
-                      <p className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-tighter">{selectedReceipt.payment_method || 'Unknown'}</p>
-                    </div>
-                  </div>
-
-                  <div className="bg-gray-50 dark:bg-gray-800 rounded-3xl p-8 space-y-4 border dark:border-gray-700">
-                    <div className="flex justify-between items-center text-xs font-bold text-gray-500 dark:text-gray-400">
-                      <span className="uppercase tracking-widest">Subtotal (Net)</span>
-                      <span className="text-gray-900 dark:text-white">{selectedReceipt.total_excl_vat} AED</span>
-                    </div>
-                    <div className="flex justify-between items-center text-xs font-bold text-gray-500 dark:text-gray-400">
-                      <span className="uppercase tracking-widest">VAT Amount ({selectedReceipt.vat_rate}%)</span>
-                      <span className="text-gray-900 dark:text-white">{selectedReceipt.vat_amount} AED</span>
-                    </div>
-                    <div className="pt-4 mt-4 border-t dark:border-gray-700 flex justify-between items-baseline">
-                      <span className="text-xs font-black text-gray-900 dark:text-white uppercase tracking-[0.2em]">Total Value</span>
-                      <span className="text-4xl font-black text-primary-600 dark:text-primary-400">{selectedReceipt.total_incl_vat} <span className="text-sm font-normal opacity-50">AED</span></span>
-                    </div>
-                  </div>
-
-                  {selectedReceipt.notes && (
-                    <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-2xl border border-blue-100 dark:border-blue-900/40">
-                      <div className="flex items-center space-x-2 mb-1">
-                        <Info className="w-3 h-3 text-blue-600" />
-                        <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest">Notes</p>
-                      </div>
-                      <p className="text-xs text-blue-800 dark:text-blue-300 font-medium">{selectedReceipt.notes}</p>
-                    </div>
-                  )}
-                  
-                  {selectedReceipt.items && selectedReceipt.items.length > 0 && (
-                    <div className="pb-6 border-b dark:border-gray-800">
-                      <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-6">Line Itemization</h4>
-                      <div className="space-y-3">
-                        {selectedReceipt.items.map((item: any, idx: number) => (
-                          <div key={idx} className="flex justify-between items-center p-4 bg-white dark:bg-gray-800 rounded-2xl border dark:border-gray-700">
-                            <div className="flex-1">
-                              <p className="text-sm font-bold text-gray-900 dark:text-white">{item.item_name}</p>
-                              <p className="text-[10px] font-black text-gray-400 uppercase tracking-tighter">Qty: {item.quantity}</p>
-                            </div>
-                            <p className="text-sm font-black text-gray-900 dark:text-white">{item.price} <span className="text-[10px] font-normal opacity-50">AED</span></p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {selectedReceipt.raw_extraction && Object.keys(selectedReceipt.raw_extraction).length > 0 && (
-                    <div>
-                      <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-4">Advanced AI Insights</h4>
-                      <div className="flex flex-wrap gap-2">
-                        {Object.entries(selectedReceipt.raw_extraction).map(([key, value]: [string, any], idx) => {
-                          // Filter out things we already show prominently
-                          if (['supplier_name', 'receipt_date', 'total_amount', 'line_item', 'total_tax_amount'].includes(key)) return null;
-                          return (
-                            <div key={idx} className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-xl border dark:border-gray-700">
-                              <p className="text-[8px] font-black text-gray-400 uppercase tracking-widest mb-0.5">{key.replace(/_/g, ' ')}</p>
-                              <p className="text-[10px] font-bold text-gray-700 dark:text-gray-300 truncate max-w-[150px]">{String(value)}</p>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Edit Modal */}
-      {editingReceipt && (
-        <div className="fixed inset-0 bg-gray-950/80 backdrop-blur-md flex items-center justify-center p-4 z-[100]">
-          <div className="bg-white dark:bg-gray-900 rounded-[2.5rem] shadow-2xl max-w-lg w-full overflow-hidden border dark:border-gray-800">
-            <div className="p-8 border-b dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/50 flex items-center justify-between">
-              <h3 className="text-xl font-black text-gray-900 dark:text-white uppercase tracking-tight">Modify Record</h3>
-              <button onClick={() => setEditingReceipt(null)} className="text-gray-400 hover:text-gray-600 transition-colors">
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-            
-            <div className="p-8 space-y-6 max-h-[70vh] overflow-y-auto">
-              <div>
-                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-3">Merchant Name</label>
-                <input
-                  type="text"
-                  value={editForm.store_name}
-                  onChange={(e) => setEditForm({ ...editForm, store_name: e.target.value })}
-                  className="w-full px-5 py-4 bg-gray-50 dark:bg-gray-800 border-none rounded-2xl focus:ring-2 focus:ring-primary-500 outline-none text-gray-900 dark:text-white font-bold"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-3">Vault Category</label>
-                <select
-                  value={editForm.category}
-                  onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}
-                  className="w-full px-5 py-4 bg-gray-50 dark:bg-gray-800 border-none rounded-2xl focus:ring-2 focus:ring-primary-500 outline-none text-gray-900 dark:text-white font-bold"
-                >
-                  {categories.map(cat => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-3">Total (AED)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={editForm.total_incl_vat}
-                    onChange={(e) => setEditForm({ ...editForm, total_incl_vat: e.target.value })}
-                    className="w-full px-5 py-4 bg-gray-50 dark:bg-gray-800 border-none rounded-2xl focus:ring-2 focus:ring-primary-500 outline-none text-green-600 font-black"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-3">VAT (AED)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={editForm.vat_amount}
-                    onChange={(e) => setEditForm({ ...editForm, vat_amount: e.target.value })}
-                    className="w-full px-5 py-4 bg-gray-50 dark:bg-gray-800 border-none rounded-2xl focus:ring-2 focus:ring-primary-500 outline-none text-gray-900 dark:text-white font-bold"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-3">Payment Type</label>
-                <select
-                  value={editForm.payment_method}
-                  onChange={(e) => setEditForm({ ...editForm, payment_method: e.target.value })}
-                  className="w-full px-5 py-4 bg-gray-50 dark:bg-gray-800 border-none rounded-2xl focus:ring-2 focus:ring-primary-500 outline-none text-gray-900 dark:text-white font-bold"
-                >
-                  <option value="Unknown">Unknown</option>
-                  <option value="Cash">Cash</option>
-                  <option value="Card">Card / Apple Pay</option>
-                  <option value="Digital Wallet">Digital Wallet (e&, careem)</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="p-8 border-t dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/50 flex space-x-4">
-              <button
-                onClick={handleSaveEdit}
-                className="flex-1 py-4 bg-primary-600 text-white rounded-2xl font-black uppercase tracking-widest hover:bg-primary-700 shadow-xl shadow-primary-200 dark:shadow-none transition-all active:scale-95"
-              >
-                Update Vault
-              </button>
-              <button
-                onClick={() => setEditingReceipt(null)}
-                className="px-8 py-4 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border dark:border-gray-700 rounded-2xl font-bold uppercase tracking-widest text-[10px]"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <ConfirmDialog
-        open={confirmOpen}
-        title="Delete Record"
-        message="This will permanently remove the receipt from your vault and GCS storage. This action is irreversible."
-        onConfirm={confirmDelete}
-        onCancel={() => { setConfirmOpen(false); setPendingDeleteId(null); }}
-        confirmText="Confirm Delete"
-        cancelText="Cancel"
-      />
-
-      {/* Manual Entry Modal */}
-      {showManualModal && (
-        <div className="fixed inset-0 bg-gray-950/80 backdrop-blur-md flex items-center justify-center p-4 z-[100]">
-          <div className="bg-white dark:bg-gray-900 rounded-[2.5rem] shadow-2xl max-w-lg w-full overflow-hidden border dark:border-gray-800">
-            <form onSubmit={handleManualSubmit}>
-              <div className="p-8 border-b dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/50 flex items-center justify-between">
-                <div>
-                  <h3 className="text-xl font-black text-gray-900 dark:text-white uppercase tracking-tight">Manual Spending</h3>
-                  <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mt-1">Add entry without receipt</p>
-                </div>
-                <button type="button" onClick={() => setShowManualModal(false)} className="text-gray-400 hover:text-gray-600 transition-colors">
-                  <X className="w-6 h-6" />
-                </button>
-              </div>
-              
-              <div className="p-8 space-y-5 max-h-[65vh] overflow-y-auto">
-                <div className="grid grid-cols-1 gap-5">
-                  <div>
-                    <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-2">Merchant / Expense Name</label>
-                    <input
-                      required
-                      type="text"
-                      placeholder="e.g., Monthly Rent, Cash Purchase"
-                      value={manualForm.store_name}
-                      onChange={(e) => setManualForm({ ...manualForm, store_name: e.target.value })}
-                      className="w-full px-5 py-4 bg-gray-50 dark:bg-gray-800 border-none rounded-2xl focus:ring-2 focus:ring-primary-500 outline-none text-gray-900 dark:text-white font-bold"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-2">Category</label>
-                    <select
-                      value={manualForm.category}
-                      onChange={(e) => setManualForm({ ...manualForm, category: e.target.value })}
-                      className="w-full px-5 py-4 bg-gray-50 dark:bg-gray-800 border-none rounded-2xl focus:ring-2 focus:ring-primary-500 outline-none text-gray-900 dark:text-white font-bold"
-                    >
-                      {categories.map(cat => (
-                        <option key={cat} value={cat}>{cat}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-2">Total (AED)</label>
-                      <input
-                        required
-                        type="number"
-                        step="0.01"
-                        placeholder="0.00"
-                        value={manualForm.total_incl_vat}
-                        onChange={(e) => setManualForm({ ...manualForm, total_incl_vat: e.target.value })}
-                        className="w-full px-5 py-4 bg-gray-50 dark:bg-gray-800 border-none rounded-2xl focus:ring-2 focus:ring-primary-500 outline-none text-gray-900 dark:text-white font-black"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-2">VAT (AED)</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        placeholder="0.00"
-                        value={manualForm.vat_amount}
-                        onChange={(e) => setManualForm({ ...manualForm, vat_amount: e.target.value })}
-                        className="w-full px-5 py-4 bg-gray-50 dark:bg-gray-800 border-none rounded-2xl focus:ring-2 focus:ring-primary-500 outline-none text-gray-900 dark:text-white font-bold"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-2">Date</label>
-                    <input
-                      required
-                      type="date"
-                      value={manualForm.date}
-                      onChange={(e) => setManualForm({ ...manualForm, date: e.target.value })}
-                      className="w-full px-5 py-4 bg-gray-50 dark:bg-gray-800 border-none rounded-2xl focus:ring-2 focus:ring-primary-500 outline-none text-gray-900 dark:text-white font-bold"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-2">Payment Type</label>
-                    <select
-                      value={manualForm.payment_method}
-                      onChange={(e) => setManualForm({ ...manualForm, payment_method: e.target.value })}
-                      className="w-full px-5 py-4 bg-gray-50 dark:bg-gray-800 border-none rounded-2xl focus:ring-2 focus:ring-primary-500 outline-none text-gray-900 dark:text-white font-bold"
-                    >
-                      <option value="Cash">Cash</option>
-                      <option value="Card">Card / Apple Pay</option>
-                      <option value="Bank Transfer">Bank Transfer</option>
-                      <option value="Cheque">Cheque</option>
-                    </select>
-                  </div>
-                  
-                  <div>
-                    <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-2">Notes</label>
-                    <textarea
-                      value={manualForm.notes}
-                      onChange={(e) => setManualForm({ ...manualForm, notes: e.target.value })}
-                      placeholder="Add any additional details..."
-                      rows={2}
-                      className="w-full px-5 py-4 bg-gray-50 dark:bg-gray-800 border-none rounded-2xl focus:ring-2 focus:ring-primary-500 outline-none text-gray-900 dark:text-white font-medium resize-none"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="p-8 border-t dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/50 flex space-x-4">
-                <button
-                  type="submit"
-                  className="flex-1 py-4 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-2xl font-black uppercase tracking-widest hover:opacity-90 transition-all active:scale-95 shadow-xl"
-                >
-                  Vault Transaction
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowManualModal(false)}
-                  className="px-8 py-4 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border dark:border-gray-700 rounded-2xl font-bold uppercase tracking-widest text-[10px]"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+export interface ReceiptFilter {
+  status?: ReviewStatus
+  issue?: 'missing_trn'
 }
 
+const STATUS_STYLES: Record<ReviewStatus, string> = {
+  pending: 'bg-gold-100 text-gold-800',
+  approved: 'bg-palm-100 text-palm-700',
+  rejected: 'bg-clay-100 text-clay-700',
+}
+
+const STATUS_LABELS: Record<ReviewStatus, string> = { pending: 'Pending', approved: 'Approved', rejected: 'Rejected' }
+
+export function StatusPill({ status }: { status: ReviewStatus }) {
+  return <span className={`chip ${STATUS_STYLES[status]}`}>{STATUS_LABELS[status]}</span>
+}
+
+function TrnChip({ receipt }: { receipt: Receipt }) {
+  return receipt.trn_valid
+    ? <span className="chip bg-palm-50 text-palm-700"><Check className="h-3 w-3" /> TRN</span>
+    : <span className="chip bg-clay-50 text-clay-600"><AlertTriangle className="h-3 w-3" /> No TRN</span>
+}
+
+const ISSUE_HELP: Record<string, string> = {
+  missing_trn: "Ask the supplier for a tax invoice showing their 15-digit TRN, then add it here. Until then this VAT can't be recovered.",
+  blocked_category: 'VAT on entertainment is usually blocked under UAE VAT rules. Your accountant can confirm.',
+  no_vat: 'No VAT on this receipt, so there is nothing to recover. It still counts as a business expense.',
+  rejected: 'Rejected in review, so it is left out of the VAT return.',
+  pending_review: 'This VAT counts toward the return once an owner or accountant approves the receipt.',
+}
+
+function ReceiptDrawer({ receipt, role, categories, onClose, onChanged }: {
+  receipt: Receipt
+  role: Role
+  categories: string[]
+  onClose: () => void
+  onChanged: (r: Receipt | null) => void
+}) {
+  const [form, setForm] = useState({
+    store_name: receipt.store_name,
+    transaction_trn: receipt.transaction_trn || '',
+    date: receipt.date?.slice(0, 10) || '',
+    category: receipt.category,
+    total_incl_vat: String(receipt.total_incl_vat ?? ''),
+    vat_amount: String(receipt.vat_amount ?? ''),
+    notes: receipt.notes || '',
+  })
+  const [note, setNote] = useState(receipt.review_note || '')
+  const [busy, setBusy] = useState(false)
+  const [confirm, setConfirm] = useState(false)
+  const canReview = role !== 'staff'
+  const canEdit = canReview || receipt.status !== 'approved'
+  const image = fileUrl(receipt.image_path)
+  const isPdf = !!receipt.image_path?.toLowerCase().endsWith('.pdf')
+
+  const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm({ ...form, [key]: e.target.value })
+
+  const run = async (fn: () => Promise<{ receipt?: Receipt }>, done: string, close = false) => {
+    setBusy(true)
+    try {
+      const data = await fn()
+      toast.success(done)
+      onChanged(data.receipt || null)
+      if (close) onClose()
+    } catch (err) {
+      toast.error(errorMessage(err, 'Something went wrong'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const save = () => run(() => updateReceipt(receipt.receipt_id, {
+    ...form,
+    total_incl_vat: parseFloat(form.total_incl_vat) || 0,
+    vat_amount: parseFloat(form.vat_amount) || 0,
+  }), 'Receipt updated')
+
+  const review = (status: ReviewStatus) => run(() => reviewReceipt(receipt.receipt_id, status, note), status === 'approved' ? 'Approved' : status === 'rejected' ? 'Rejected' : 'Moved back to pending')
+
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex justify-end bg-night-950/40 backdrop-blur-[2px]" onClick={onClose}>
+      <div className="fade-in flex h-full w-full max-w-xl flex-col bg-sand-50 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start gap-3 border-b border-sand-200 bg-white px-6 py-5">
+          <div className="flex-1">
+            <div className="flex items-center gap-2"><StatusPill status={receipt.status} /><TrnChip receipt={receipt} /></div>
+            <h2 className="mt-2 font-display text-2xl font-semibold">{receipt.store_name}</h2>
+            <p className="text-xs text-night-500">
+              Uploaded by {receipt.uploaded_by || 'someone'} · {shortDate(receipt.date)}
+              {receipt.reviewed_by && ` · ${STATUS_LABELS[receipt.status].toLowerCase()} by ${receipt.reviewed_by}`}
+            </p>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-2 hover:bg-sand-100"><X className="h-5 w-5" /></button>
+        </div>
+
+        <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+          {receipt.vat_issue && (
+            <div className={`rounded-xl border p-3.5 text-sm ${receipt.vat_issue === 'no_vat' || receipt.vat_issue === 'pending_review' ? 'border-sand-200 bg-white text-night-600' : 'border-clay-100 bg-clay-50 text-clay-700'}`}>
+              <div className="font-semibold">{ISSUE_LABELS[receipt.vat_issue]}</div>
+              <div className="mt-0.5 opacity-90">{ISSUE_HELP[receipt.vat_issue]}</div>
+            </div>
+          )}
+          {receipt.vat_claimable && (
+            <div className="flex items-center gap-2 rounded-xl border border-palm-100 bg-palm-50 p-3.5 text-sm text-palm-700">
+              <CheckCircle2 className="h-4 w-4" /> {aed(receipt.vat_amount)} VAT is recoverable on this receipt
+            </div>
+          )}
+
+          {image && (
+            isPdf ? (
+              <a href={image} target="_blank" rel="noreferrer" className="btn-ghost w-full"><FileText className="h-4 w-4" /> Open original PDF <ExternalLink className="h-3.5 w-3.5" /></a>
+            ) : (
+              <a href={image} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-xl border border-sand-200 bg-white">
+                <img src={image} alt="Receipt" className="max-h-72 w-full object-contain" />
+              </a>
+            )
+          )}
+
+          <div className="card grid gap-4 p-5 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <label className="label">Supplier</label>
+              <input className="input" value={form.store_name} onChange={set('store_name')} disabled={!canEdit} />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="label">Supplier TRN</label>
+              <input className="input font-mono" value={form.transaction_trn} onChange={set('transaction_trn')} disabled={!canEdit} placeholder="15 digits" />
+              {form.transaction_trn && !isValidTrn(form.transaction_trn) && <div className="mt-1 text-xs text-clay-600">A UAE TRN has 15 digits</div>}
+            </div>
+            <div>
+              <label className="label">Date</label>
+              <input type="date" className="input" value={form.date} onChange={set('date')} disabled={!canEdit} />
+            </div>
+            <div>
+              <label className="label">Category</label>
+              <select className="input" value={form.category} onChange={set('category')} disabled={!canEdit}>
+                {[...new Set([form.category, ...categories])].map((c) => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="label">Total incl. VAT (AED)</label>
+              <input type="number" step="0.01" className="input" value={form.total_incl_vat} onChange={set('total_incl_vat')} disabled={!canEdit} />
+              {receipt.currency !== 'AED' && receipt.original_amount != null && (
+                <div className="mt-1 text-xs text-night-400">Paid {receipt.currency} {receipt.original_amount}</div>
+              )}
+            </div>
+            <div>
+              <label className="label">VAT (AED)</label>
+              <input type="number" step="0.01" className="input" value={form.vat_amount} onChange={set('vat_amount')} disabled={!canEdit} />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="label">Note</label>
+              <input className="input" value={form.notes} onChange={set('notes')} disabled={!canEdit} />
+            </div>
+            {canEdit && <button onClick={save} disabled={busy} className="btn-primary sm:col-span-2">{busy && <Loader2 className="h-4 w-4 animate-spin" />} Save changes</button>}
+            {!canEdit && <p className="text-xs text-night-500 sm:col-span-2">Approved receipts can only be changed by the owner or accountant.</p>}
+          </div>
+
+          {receipt.items.length > 0 && (
+            <div className="card p-5">
+              <h3 className="text-sm font-semibold">Line items</h3>
+              <div className="mt-2 divide-y divide-sand-200 text-sm">
+                {receipt.items.map((item, i) => (
+                  <div key={i} className="flex justify-between py-2"><span>{item.quantity} × {item.item_name}</span><span>{aed(item.price)}</span></div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {canReview && (
+            <div className="card p-5">
+              <h3 className="font-display text-lg font-semibold">Review</h3>
+              <input className="input mt-3" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note for the uploader (optional)" />
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <button onClick={() => review('approved')} disabled={busy} className="btn bg-palm-600 text-white hover:bg-palm-700"><CheckCircle2 className="h-4 w-4" /> Approve</button>
+                <button onClick={() => review('rejected')} disabled={busy} className="btn-danger"><XCircle className="h-4 w-4" /> Reject</button>
+              </div>
+              {receipt.status !== 'pending' && (
+                <button onClick={() => review('pending')} disabled={busy} className="mt-3 flex items-center gap-1.5 text-xs font-semibold text-night-500 hover:text-night-800"><RotateCcw className="h-3.5 w-3.5" /> Move back to pending</button>
+              )}
+            </div>
+          )}
+          {!canReview && receipt.review_note && (
+            <div className="card p-4 text-sm"><span className="font-semibold">Reviewer note:</span> {receipt.review_note}</div>
+          )}
+        </div>
+
+        {canEdit && (
+          <div className="border-t border-sand-200 bg-white px-6 py-4">
+            <button onClick={() => setConfirm(true)} className="flex items-center gap-2 text-sm font-semibold text-clay-600 hover:text-clay-700"><Trash2 className="h-4 w-4" /> Delete receipt</button>
+          </div>
+        )}
+      </div>
+      <ConfirmDialog
+        open={confirm}
+        title="Delete this receipt?"
+        message="The receipt and its image will be removed. This can't be undone."
+        confirmText="Delete"
+        onCancel={() => setConfirm(false)}
+        onConfirm={() => { setConfirm(false); run(() => deleteReceipt(receipt.receipt_id), 'Receipt deleted', true) }}
+      />
+    </div>
+  , document.body)
+}
+
+export default function ReceiptList({ role, initialFilter }: { role: Role; initialFilter: ReceiptFilter }) {
+  const [receipts, setReceipts] = useState<Receipt[] | null>(null)
+  const [categories, setCategories] = useState<string[]>([])
+  const [status, setStatus] = useState<ReviewStatus | 'all'>(initialFilter.status || 'all')
+  const [missingTrn, setMissingTrn] = useState(initialFilter.issue === 'missing_trn')
+  const [category, setCategory] = useState('all')
+  const [search, setSearch] = useState('')
+  const [open, setOpen] = useState<Receipt | null>(null)
+
+  const load = useCallback(() => {
+    getReceipts({
+      status: status === 'all' ? undefined : status,
+      category: category === 'all' ? undefined : category,
+      store_name: search || undefined,
+      issue: missingTrn ? 'missing_trn' : undefined,
+    }).then((d) => setReceipts(d.receipts)).catch(() => setReceipts([]))
+  }, [status, category, search, missingTrn])
+
+  useEffect(() => { const t = setTimeout(load, search ? 300 : 0); return () => clearTimeout(t) }, [load, search])
+  useEffect(() => { getCategories().then((d) => setCategories(d.categories)).catch(() => undefined) }, [])
+
+  const handleChanged = (updated: Receipt | null) => {
+    if (updated) setOpen(updated)
+    load()
+  }
+
+  const totals = (receipts || []).reduce((acc, r) => ({ gross: acc.gross + r.total_incl_vat, vat: acc.vat + r.vat_amount }), { gross: 0, vat: 0 })
+
+  return (
+    <div className="space-y-4 fade-in">
+      <div className="card flex flex-wrap items-center gap-3 p-3">
+        <div className="flex rounded-xl bg-sand-100 p-1 text-sm font-semibold">
+          {(['all', 'pending', 'approved', 'rejected'] as const).map((s) => (
+            <button key={s} onClick={() => setStatus(s)} className={`rounded-lg px-3 py-1.5 capitalize transition ${status === s ? 'bg-white text-night-900 shadow-sm' : 'text-night-500 hover:text-night-800'}`}>{s}</button>
+          ))}
+        </div>
+        <div className="relative min-w-[180px] flex-1">
+          <Search className="absolute left-3 top-3 h-4 w-4 text-sand-400" />
+          <input className="input pl-9" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search supplier" />
+        </div>
+        <select className="input w-auto" value={category} onChange={(e) => setCategory(e.target.value)}>
+          <option value="all">All categories</option>
+          {categories.map((c) => <option key={c}>{c}</option>)}
+        </select>
+        <button onClick={() => setMissingTrn(!missingTrn)} className={`btn ${missingTrn ? 'bg-clay-600 text-white' : 'btn-ghost'}`}>
+          <AlertTriangle className="h-4 w-4" /> Missing TRN
+        </button>
+      </div>
+
+      {receipts === null ? (
+        <div className="flex justify-center py-20"><Loader2 className="h-6 w-6 animate-spin text-gold-500" /></div>
+      ) : receipts.length === 0 ? (
+        <div className="card px-6 py-16 text-center text-sm text-night-500">No receipts match these filters.</div>
+      ) : (
+        <div className="card overflow-hidden">
+          <div className="hidden grid-cols-[100px_1.6fr_1.2fr_90px_110px_120px_100px] gap-3 border-b border-sand-200 bg-sand-50 px-5 py-3 text-[11px] font-bold uppercase tracking-wider text-night-400 md:grid">
+            <div>Date</div><div>Supplier</div><div>Category</div><div>TRN</div><div className="text-right">VAT</div><div className="text-right">Total</div><div className="text-right">Status</div>
+          </div>
+          <div className="divide-y divide-sand-200">
+            {receipts.map((r) => (
+              <button key={r.receipt_id} onClick={() => setOpen(r)} className="grid w-full grid-cols-[1fr_auto] gap-x-3 gap-y-1 px-5 py-3.5 text-left text-sm transition hover:bg-sand-50 md:grid-cols-[100px_1.6fr_1.2fr_90px_110px_120px_100px] md:items-center">
+                <div className="order-3 text-xs text-night-500 md:order-none md:text-sm">{shortDate(r.date)}</div>
+                <div className="order-1 min-w-0 md:order-none">
+                  <div className="truncate font-semibold">{r.store_name}</div>
+                  <div className="truncate text-xs text-night-400">{r.uploaded_by}{r.transaction_trn && r.trn_valid ? ` · ${formatTrn(r.transaction_trn)}` : ''}</div>
+                </div>
+                <div className="hidden truncate text-night-600 md:block">{r.category}</div>
+                <div className="hidden md:block"><TrnChip receipt={r} /></div>
+                <div className={`hidden text-right md:block ${r.vat_claimable ? 'text-palm-700' : 'text-night-500'}`}>{aed(r.vat_amount)}</div>
+                <div className="order-2 text-right font-semibold md:order-none">{aed(r.total_incl_vat)}</div>
+                <div className="order-4 text-right md:order-none"><StatusPill status={r.status} /></div>
+              </button>
+            ))}
+          </div>
+          <div className="flex justify-between border-t border-sand-200 bg-sand-50 px-5 py-3 text-sm">
+            <span className="text-night-500">{receipts.length} receipts</span>
+            <span className="font-semibold">{aed(totals.gross)} <span className="font-normal text-night-500">· VAT {aed(totals.vat)}</span></span>
+          </div>
+        </div>
+      )}
+
+      {open && <ReceiptDrawer key={`${open.receipt_id}-${open.status}`} receipt={open} role={role} categories={categories} onClose={() => setOpen(null)} onChanged={handleChanged} />}
+    </div>
+  )
+}

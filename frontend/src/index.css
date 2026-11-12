@@ -3,14 +3,10 @@
 @tailwind utilities;
 
 :root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
   line-height: 1.5;
-  font-weight: 400;
-
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #f3f4f6;
-
+  color: #0b1a2c;
+  background-color: #f6f1e7;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -24,4 +20,49 @@ body {
 
 * {
   box-sizing: border-box;
+}
+
+@layer components {
+  .card {
+    @apply bg-white rounded-2xl border border-sand-200 shadow-card;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98];
+  }
+  .btn-primary {
+    @apply btn bg-night-900 text-white hover:bg-night-800;
+  }
+  .btn-gold {
+    @apply btn bg-gradient-to-b from-gold-400 to-gold-500 text-night-950 shadow-gold hover:from-gold-300 hover:to-gold-400;
+  }
+  .btn-ghost {
+    @apply btn bg-white border border-sand-300 text-night-800 hover:bg-sand-50;
+  }
+  .btn-danger {
+    @apply btn bg-clay-50 text-clay-600 border border-clay-100 hover:bg-clay-100;
+  }
+  .input {
+    @apply w-full rounded-xl border border-sand-300 bg-white px-3.5 py-2.5 text-sm text-night-900 placeholder:text-sand-400 outline-none transition focus:border-gold-400 focus:ring-4 focus:ring-gold-100;
+  }
+  .label {
+    @apply block text-xs font-semibold uppercase tracking-wider text-night-500 mb-1.5;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold;
+  }
+  .eyebrow {
+    @apply text-[11px] font-bold uppercase tracking-[0.18em] text-gold-600;
+  }
+  .pattern-mashrabiya {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='56' viewBox='0 0 56 56'%3E%3Cg fill='none' stroke='%23d4a845' stroke-width='1'%3E%3Crect x='17' y='17' width='22' height='22'/%3E%3Crect x='17' y='17' width='22' height='22' transform='rotate(45 28 28)'/%3E%3Ccircle cx='28' cy='28' r='5'/%3E%3Cpath d='M0 28h6M50 28h6M28 0v6M28 50v6'/%3E%3C/g%3E%3C/svg%3E");
+  }
+}
+
+.fade-in {
+  animation: fadeIn 0.35s ease-out both;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
 }

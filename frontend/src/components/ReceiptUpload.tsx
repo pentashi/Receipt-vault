@@ -1,197 +1,197 @@
-import { useState } from 'react'
-import { Upload, CheckCircle, AlertCircle, Loader2, Sparkles, Camera, X, Zap, Receipt } from 'lucide-react'
-import { uploadReceipt } from '../services/api'
+import { useEffect, useRef, useState } from 'react'
+import toast from 'react-hot-toast'
+import { AlertTriangle, Camera, CheckCircle2, FileText, Keyboard, Loader2, ShieldCheck, Upload, X } from 'lucide-react'
+import { createManualReceipt, getCategories, uploadReceipt } from '../services/api'
+import { aed, errorMessage, formatTrn, isValidTrn } from '../lib/format'
+import type { Receipt } from '../lib/types'
 
-interface ReceiptUploadProps {
-  onUploadSuccess: () => void
-}
+const PAYMENT_METHODS = ['Card', 'Cash', 'Bank transfer', 'Company card', 'Apple Pay']
 
-export default function ReceiptUpload({ onUploadSuccess }: ReceiptUploadProps) {
+export default function ReceiptUpload({ onDone }: { onDone: () => void }) {
+  const [mode, setMode] = useState<'scan' | 'manual'>('scan')
+  const [categories, setCategories] = useState<string[]>([])
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
-  const [uploading, setUploading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<{ receipt: Receipt; autoRead: boolean } | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const today = new Date().toISOString().slice(0, 10)
+  const [form, setForm] = useState({
+    store_name: '', transaction_trn: '', date: today, category: '', total_incl_vat: '', vat_amount: '', payment_method: 'Card', notes: '',
+  })
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0]
-    if (selectedFile) {
-      setFile(selectedFile)
-      setError(null)
-      setSuccess(false)
-      const reader = new FileReader()
-      reader.onloadend = () => {
-        setPreview(reader.result as string)
-      }
-      reader.readAsDataURL(selectedFile)
-    }
+  useEffect(() => { getCategories().then((d) => setCategories(d.categories)).catch(() => undefined) }, [])
+
+  const pick = (f: File | undefined) => {
+    if (!f) return
+    setFile(f)
+    setResult(null)
+    setPreview(f.type.startsWith('image/') ? URL.createObjectURL(f) : null)
   }
 
-  const handleUpload = async () => {
-    if (!file) {
-      setError('Please select a file first')
-      return
-    }
-
+  const scan = async () => {
+    if (!file) return
+    setBusy(true)
     try {
-      setUploading(true)
-      setError(null)
-      
-      await uploadReceipt(file)
-      
-      setSuccess(true)
+      const data = await uploadReceipt(file)
+      setResult({ receipt: data.receipt, autoRead: data.auto_read })
       setFile(null)
       setPreview(null)
-      
-      setTimeout(() => {
-        onUploadSuccess()
-      }, 2000)
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to process receipt. Please ensure it is a clear image.')
+    } catch (err) {
+      toast.error(errorMessage(err, 'Upload failed. Try a clearer photo.'))
     } finally {
-      setUploading(false)
+      setBusy(false)
     }
   }
 
+  const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
+    setForm({ ...form, [key]: e.target.value })
+
+  const fillVat = () => {
+    const gross = parseFloat(form.total_incl_vat)
+    if (gross > 0) setForm({ ...form, vat_amount: (gross - gross / 1.05).toFixed(2) })
+  }
+
+  const saveManual = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setBusy(true)
+    try {
+      const data = await createManualReceipt({
+        ...form,
+        total_incl_vat: parseFloat(form.total_incl_vat) || 0,
+        vat_amount: parseFloat(form.vat_amount) || 0,
+        category: form.category || undefined,
+      })
+      setResult({ receipt: data.receipt, autoRead: true })
+      setForm({ ...form, store_name: '', transaction_trn: '', total_incl_vat: '', vat_amount: '', notes: '' })
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not save the receipt.'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const trnState = form.transaction_trn ? (isValidTrn(form.transaction_trn) ? 'ok' : 'bad') : 'empty'
+
   return (
-    <div className="max-w-2xl mx-auto animate-in slide-in-from-bottom-4 duration-500">
-      <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-2xl border border-gray-100 dark:border-gray-800 overflow-hidden">
-        <div className="p-8 border-b dark:border-gray-800 bg-gradient-to-br from-primary-600 to-primary-800 text-white relative">
-          <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
-            <Sparkles className="w-24 h-24" />
+    <div className="mx-auto grid max-w-5xl gap-6 fade-in lg:grid-cols-[1.5fr_1fr]">
+      <div className="card overflow-hidden">
+        <div className="grid grid-cols-2 border-b border-sand-200 text-sm font-semibold">
+          {([['scan', 'Scan receipt', Camera], ['manual', 'Type it in', Keyboard]] as const).map(([id, label, Icon]) => (
+            <button key={id} onClick={() => { setMode(id); setResult(null) }} className={`flex items-center justify-center gap-2 py-3.5 transition ${mode === id ? 'border-b-2 border-gold-500 text-night-900' : 'text-night-400 hover:text-night-700'}`}>
+              <Icon className="h-4 w-4" /> {label}
+            </button>
+          ))}
+        </div>
+
+        {mode === 'scan' ? (
+          <div className="p-6">
+            <div
+              onClick={() => inputRef.current?.click()}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => { e.preventDefault(); pick(e.dataTransfer.files?.[0]) }}
+              className={`relative flex min-h-[280px] cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed p-6 text-center transition ${file ? 'border-gold-400 bg-gold-50/40' : 'border-sand-300 hover:border-gold-400 hover:bg-sand-50'}`}
+            >
+              <input ref={inputRef} type="file" accept="image/*,application/pdf" capture="environment" className="hidden" onChange={(e) => pick(e.target.files?.[0])} />
+              {file ? (
+                <>
+                  {preview ? <img src={preview} alt="Receipt preview" className="max-h-64 rounded-xl shadow-card" /> : <FileText className="h-14 w-14 text-gold-600" />}
+                  <div className="mt-3 text-sm font-semibold">{file.name}</div>
+                  <button onClick={(e) => { e.stopPropagation(); setFile(null); setPreview(null) }} className="absolute right-3 top-3 rounded-full bg-white p-1.5 shadow"><X className="h-4 w-4" /></button>
+                </>
+              ) : (
+                <>
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-night-950"><Upload className="h-6 w-6 text-gold-300" /></div>
+                  <div className="mt-4 font-display text-lg font-semibold">Drop a receipt or tap to take a photo</div>
+                  <div className="mt-1 text-sm text-night-500">JPG, PNG or PDF · tax invoices, fuel slips, DEWA bills</div>
+                </>
+              )}
+            </div>
+            <button onClick={scan} disabled={!file || busy} className="btn-primary mt-5 w-full py-3">
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+              {busy ? 'Reading receipt…' : 'Read & add to this quarter'}
+            </button>
           </div>
-          <div className="relative z-10 flex items-center space-x-4">
-            <div className="p-3 bg-white/20 backdrop-blur-md rounded-2xl">
-              <Camera className="w-8 h-8" />
+        ) : (
+          <form onSubmit={saveManual} className="grid gap-4 p-6 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <label className="label">Supplier</label>
+              <input className="input" value={form.store_name} onChange={set('store_name')} placeholder="ENOC, DEWA, Sharaf DG…" required />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="label">Supplier TRN</label>
+              <input className={`input font-mono ${trnState === 'bad' ? 'border-clay-500' : ''}`} value={form.transaction_trn} onChange={set('transaction_trn')} placeholder="15 digits, printed on the tax invoice" inputMode="numeric" />
+              <div className={`mt-1 text-xs ${trnState === 'ok' ? 'text-palm-600' : trnState === 'bad' ? 'text-clay-600' : 'text-night-400'}`}>
+                {trnState === 'ok' ? `Valid format · ${formatTrn(form.transaction_trn)}` : trnState === 'bad' ? 'A UAE TRN has 15 digits' : "Without a TRN you can't recover the VAT"}
+              </div>
             </div>
             <div>
-              <h2 className="text-2xl font-black uppercase tracking-tight">Smart Scan</h2>
-              <p className="text-primary-100 text-sm font-bold opacity-80 uppercase tracking-widest">AI Extraction Engine</p>
+              <label className="label">Date</label>
+              <input type="date" className="input" value={form.date} max={today} onChange={set('date')} required />
             </div>
-          </div>
-        </div>
-
-        <div className="p-8 space-y-8">
-          {/* Upload Area */}
-          <div className={`relative border-2 border-dashed rounded-3xl p-1 transition-all ${
-            preview ? 'border-primary-500 bg-primary-50/5' : 'border-gray-200 dark:border-gray-800 hover:border-primary-400 dark:hover:border-primary-500'
-          }`}>
-            {preview ? (
-              <div className="relative p-4 text-center">
-                <button 
-                  onClick={() => { setFile(null); setPreview(null); }}
-                  className="absolute top-2 right-2 p-2 bg-red-500 text-white rounded-full shadow-lg hover:bg-red-600 transition-all z-20"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-                <div className="relative inline-block group">
-                  <img 
-                    src={preview} 
-                    alt="Receipt preview" 
-                    className="max-h-96 mx-auto rounded-2xl shadow-2xl border-4 border-white dark:border-gray-800 transition-transform group-hover:scale-[1.01]"
-                  />
-                </div>
-                <p className="mt-4 text-xs font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Ready for analysis</p>
-              </div>
-            ) : (
-              <div className="py-12 text-center group">
-                <div className="w-20 h-20 bg-gray-50 dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-6 group-hover:scale-110 transition-transform duration-300">
-                  <Upload className="w-10 h-10 text-primary-500" />
-                </div>
-                <div>
-                  <label htmlFor="file-upload" className="cursor-pointer">
-                    <span className="bg-primary-600 text-white px-8 py-4 rounded-2xl font-black uppercase tracking-widest hover:bg-primary-700 shadow-xl shadow-primary-200 dark:shadow-none inline-block transition-all active:scale-95">
-                      Choose File
-                    </span>
-                    <p className="mt-6 text-sm text-gray-500 dark:text-gray-400 font-bold uppercase tracking-tighter">Or drag and drop your receipt</p>
-                  </label>
-                  <input
-                    id="file-upload"
-                    type="file"
-                    accept="image/*,.pdf"
-                    onChange={handleFileChange}
-                    className="hidden"
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Benefits Icons */}
-          {!preview && (
-            <div className="grid grid-cols-3 gap-4 pt-4">
-              {[
-                { label: 'Categorize', icon: Sparkles },
-                { label: 'VAT Scan', icon: Zap },
-                { label: 'Line Items', icon: Receipt }
-              ].map((item, i) => (
-                <div key={i} className="text-center p-3 rounded-2xl bg-gray-50 dark:bg-gray-800/50 border border-gray-100 dark:border-gray-800">
-                  <item.icon className="w-5 h-5 text-primary-500 mx-auto mb-2" />
-                  <span className="text-[10px] font-black uppercase tracking-widest text-gray-500 dark:text-gray-400">{item.label}</span>
-                </div>
-              ))}
+            <div>
+              <label className="label">Category</label>
+              <select className="input" value={form.category} onChange={set('category')}>
+                <option value="">Detect from supplier</option>
+                {categories.map((c) => <option key={c}>{c}</option>)}
+              </select>
             </div>
-          )}
-
-          {/* Status Messages */}
-          {error && (
-            <div className="bg-red-50 dark:bg-red-950/20 border border-red-100 dark:border-red-900/40 rounded-2xl p-4 flex items-start animate-in zoom-in duration-300">
-              <AlertCircle className="w-5 h-5 text-red-600 mr-3 mt-0.5" />
-              <div>
-                <p className="text-sm font-black text-red-800 dark:text-red-200 uppercase tracking-tight">Processing Error</p>
-                <p className="text-xs text-red-600 dark:text-red-400 mt-1 font-bold">{error}</p>
-              </div>
+            <div>
+              <label className="label">Total incl. VAT (AED)</label>
+              <input type="number" step="0.01" min="0" className="input" value={form.total_incl_vat} onChange={set('total_incl_vat')} onBlur={() => !form.vat_amount && fillVat()} required />
             </div>
-          )}
-
-          {success && (
-            <div className="bg-green-50 dark:bg-green-950/20 border border-green-100 dark:border-green-900/40 rounded-2xl p-8 text-center animate-in zoom-in duration-300">
-              <div className="w-16 h-16 bg-green-100 dark:bg-green-900/40 rounded-full flex items-center justify-center mx-auto mb-4">
-                <CheckCircle className="w-8 h-8 text-green-600" />
-              </div>
-              <p className="text-xl font-black text-green-800 dark:text-green-200 uppercase tracking-tight">Success!</p>
-              <p className="text-sm text-green-600 dark:text-green-400 font-bold mt-1">Receipt vault entry confirmed.</p>
+            <div>
+              <label className="label flex justify-between">VAT (AED) <button type="button" onClick={fillVat} className="normal-case tracking-normal text-gold-600 hover:underline">Calculate 5%</button></label>
+              <input type="number" step="0.01" min="0" className="input" value={form.vat_amount} onChange={set('vat_amount')} />
             </div>
-          )}
-
-          {/* Upload Button */}
-          {!success && (
-            <div className="pt-4">
-              <button
-                onClick={handleUpload}
-                disabled={!file || uploading}
-                className={`w-full py-5 rounded-2xl font-black uppercase tracking-[0.2em] text-lg transition-all flex items-center justify-center space-x-3 ${
-                  !file || uploading
-                    ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 cursor-not-allowed'
-                    : 'bg-primary-600 text-white hover:bg-primary-700 shadow-2xl shadow-primary-200 dark:shadow-none active:scale-[0.98]'
-                }`}
-              >
-                {uploading ? (
-                  <>
-                    <Loader2 className="w-6 h-6 animate-spin" />
-                    <span>Analyzing...</span>
-                  </>
-                ) : (
-                  <>
-                    <Zap className="w-6 h-6 fill-white" />
-                    <span>Extract Data</span>
-                  </>
-                )}
-              </button>
+            <div>
+              <label className="label">Paid with</label>
+              <select className="input" value={form.payment_method} onChange={set('payment_method')}>
+                {PAYMENT_METHODS.map((m) => <option key={m}>{m}</option>)}
+              </select>
             </div>
-          )}
-
-          <div className="text-center">
-            <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-[0.3em] mb-4">Accepted Formats</p>
-            <div className="flex justify-center space-x-3">
-              {['PDF', 'JPG', 'PNG'].map(ext => (
-                <span key={ext} className="px-3 py-1 bg-gray-50 dark:bg-gray-800 rounded-lg text-[10px] font-black text-gray-500 dark:text-gray-400 border border-gray-100 dark:border-gray-700">{ext}</span>
-              ))}
+            <div>
+              <label className="label">Note</label>
+              <input className="input" value={form.notes} onChange={set('notes')} placeholder="Client lunch, site visit…" />
             </div>
-          </div>
-        </div>
+            <button type="submit" disabled={busy} className="btn-primary py-3 sm:col-span-2">
+              {busy && <Loader2 className="h-4 w-4 animate-spin" />} Save receipt
+            </button>
+          </form>
+        )}
       </div>
+
+      <aside className="space-y-4">
+        {result ? (
+          <div className="card fade-in p-5">
+            <div className={`flex items-center gap-2 text-sm font-semibold ${result.autoRead ? 'text-palm-600' : 'text-gold-700'}`}>
+              {result.autoRead ? <CheckCircle2 className="h-5 w-5" /> : <AlertTriangle className="h-5 w-5" />}
+              {result.autoRead ? 'Added, waiting for review' : "Saved. We couldn't read it, please fill in the details"}
+            </div>
+            <div className="mt-4 rounded-xl bg-sand-50 p-4">
+              <div className="font-display text-lg font-semibold">{result.receipt.store_name}</div>
+              <div className="text-xs text-night-500">{result.receipt.category}</div>
+              <dl className="mt-3 space-y-1.5 text-sm">
+                <div className="flex justify-between"><dt className="text-night-500">Total</dt><dd className="font-semibold">{aed(result.receipt.total_incl_vat)}</dd></div>
+                <div className="flex justify-between"><dt className="text-night-500">VAT</dt><dd className="font-semibold">{aed(result.receipt.vat_amount)}</dd></div>
+                <div className="flex justify-between"><dt className="text-night-500">Supplier TRN</dt><dd className={result.receipt.trn_valid ? 'font-mono text-palm-600' : 'text-clay-600'}>{result.receipt.trn_valid ? formatTrn(result.receipt.transaction_trn) : 'Missing'}</dd></div>
+              </dl>
+            </div>
+            <button onClick={onDone} className="btn-ghost mt-4 w-full">Go to receipts</button>
+          </div>
+        ) : (
+          <div className="rounded-2xl bg-night-950 p-5 text-white">
+            <div className="pattern-mashrabiya -m-5 mb-0 h-2 opacity-20" />
+            <h3 className="mt-3 font-display text-lg font-semibold text-gold-200">What makes a receipt claimable?</h3>
+            <ul className="mt-3 space-y-3 text-sm text-night-100">
+              <li className="flex gap-2"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-gold-300" /> It's a tax invoice showing the supplier's 15-digit TRN</li>
+              <li className="flex gap-2"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-gold-300" /> VAT is charged at 5% and shown separately</li>
+              <li className="flex gap-2"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-gold-300" /> It's a business expense, not staff entertainment</li>
+            </ul>
+            <p className="mt-4 text-xs text-night-300">Keep originals for at least 5 years. ReceiptVault stores them for you.</p>
+          </div>
+        )}
+      </aside>
     </div>
   )
 }
-
