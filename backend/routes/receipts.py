@@ -1,475 +1,334 @@
-from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask import Blueprint, request, jsonify, g, send_from_directory
 from werkzeug.utils import secure_filename
 import os
 from datetime import datetime
 import uuid
-from google.cloud import storage
+import shutil
 import traceback
 
-from models import db, Receipt, ReceiptItem, AuditLog
+from models import db, Receipt, ReceiptItem, REVIEW_STATUSES, normalize_trn
 from services.ocr_service import OCRService
 from services.fx_service import fx_service
+from services.tenancy import company_required, receipt_scope, audit
 from config import Config
 
 receipts_bp = Blueprint('receipts', __name__)
 
-# Initialize OCR service
 ocr_service = OCRService()
 
-# Initialize GCS client
-try:
-    storage_client = storage.Client()
-except Exception as e:
-    print(f"Failed to initialize GCS storage client: {str(e)}")
-    storage_client = None
-
-def upload_to_gcs(filepath, filename, original_content_type=None):
-    """Upload file from local path to GCS and return the public URL"""
-    if not storage_client:
-        raise Exception("GCS storage client not available")
-        
-    bucket = storage_client.bucket(Config.GCS_BUCKET_NAME)
-    blob = bucket.blob(f"receipts/{filename}")
-    
-    # Determine content type if not provided
-    content_type = original_content_type
-    if not content_type:
-        ext = filename.rsplit('.', 1)[1].lower()
-        if ext == 'pdf':
-            content_type = 'application/pdf'
-        elif ext in ['jpg', 'jpeg']:
-            content_type = 'image/jpeg'
-        elif ext == 'png':
-            content_type = 'image/png'
-            
-    blob.upload_from_filename(filepath, content_type=content_type)
-    return blob.public_url
-
-def delete_from_gcs(public_url):
-    """Delete file from GCS using its public URL"""
+storage_client = None
+if Config.GCS_BUCKET_NAME:
     try:
-        if not storage_client or not public_url or Config.GCS_BUCKET_NAME not in public_url:
-            return
-            
-        filename = public_url.split(f"{Config.GCS_BUCKET_NAME}/")[-1]
-        bucket = storage_client.bucket(Config.GCS_BUCKET_NAME)
-        blob = bucket.blob(filename)
-        blob.delete()
+        from google.cloud import storage
+        storage_client = storage.Client()
     except Exception as e:
-        print(f"Error deleting from GCS: {str(e)}")
+        print(f"GCS unavailable, storing receipts on local disk: {e}")
+
+
+def store_file(filepath, filename, content_type=None):
+    """Save the receipt image to GCS when configured, otherwise to local disk. Returns a URL."""
+    if storage_client:
+        blob = storage_client.bucket(Config.GCS_BUCKET_NAME).blob(f"receipts/{filename}")
+        blob.upload_from_filename(filepath, content_type=content_type)
+        return blob.public_url
+    os.makedirs(Config.UPLOAD_FOLDER, exist_ok=True)
+    shutil.copy(filepath, os.path.join(Config.UPLOAD_FOLDER, filename))
+    return f"/api/v1/receipts/files/{filename}"
+
+
+def delete_file(url):
+    try:
+        if not url:
+            return
+        if url.startswith('/api/v1/receipts/files/'):
+            path = os.path.join(Config.UPLOAD_FOLDER, os.path.basename(url))
+            if os.path.exists(path):
+                os.remove(path)
+        elif storage_client and Config.GCS_BUCKET_NAME in url:
+            name = url.split(f"{Config.GCS_BUCKET_NAME}/")[-1]
+            storage_client.bucket(Config.GCS_BUCKET_NAME).blob(name).delete()
+    except Exception as e:
+        print(f"Error deleting receipt file: {e}")
+
+
+CATEGORY_KEYWORDS = [
+    ('Fuel & Vehicle', ['petrol', 'enoc', 'eppco', 'adnoc', 'emarat', 'fuel', 'cafu', 'gas station', 'autopro',
+                        'tyre', 'garage', 'auto repair', 'car wash', 'salik', 'rta', 'parking', 'mawaqif']),
+    ('Utilities (DEWA/SEWA)', ['dewa', 'sewa', 'fewa', 'addc', 'aadc', 'empower', 'emcool', 'tabreed']),
+    ('Telecom & Internet', ['etisalat', 'e&', ' du ', 'du business', 'virgin mobile', 'telecom', 'internet']),
+    ('Logistics & Courier', ['dhl', 'fedex', 'aramex', 'emirates post', 'ups', 'courier', 'shipping', 'cargo']),
+    ('Transport & Travel', ['taxi', 'metro', 'uber', 'careem', 'nol', 'emirates airline', 'flydubai', 'etihad',
+                            'air arabia', 'hotel', 'booking.com', 'airbnb', 'travel']),
+    ('Meals & Entertainment', ['restaurant', 'cafe', 'coffee', 'cafeteria', 'starbucks', 'costa', 'bakery',
+                               'shawarma', 'talabat', 'deliveroo', 'noon food', 'zomato', 'dining', 'grill', 'kitchen']),
+    ('IT, Software & Equipment', ['sharaf', 'e-max', 'jumbo', 'electronics', 'apple', 'samsung', 'computer',
+                                  'microsoft', 'google', 'aws', 'adobe', 'zoom', 'software', 'printer', 'virgin megastore']),
+    ('Marketing & Advertising', ['print', 'signage', 'advert', 'marketing', 'meta platforms', 'facebook', 'linkedin', 'media']),
+    ('Government & Licensing', ['dubai economy', 'ded', 'mohre', 'ica', 'amer', 'tasheel', 'tawjeeh', 'typing',
+                                'court', 'municipality', 'customs', 'chamber of commerce', 'free zone', 'dmcc', 'ifza']),
+    ('Rent & Facilities', ['rent', 'real estate', 'property', 'ejari', 'wasl', 'emaar', 'nakheel', 'business centre',
+                           'coworking', 'regus', 'facility']),
+    ('Maintenance & Repairs', ['maintenance', 'repair', 'cleaning', 'pest control', 'ac service', 'plumbing', 'electrical']),
+    ('Professional Services', ['legal', 'law firm', 'advocates', 'audit', 'accounting', 'consult', 'notary']),
+    ('Office & Supplies', ['office', 'stationery', 'supplies', 'ikea', 'ace hardware', 'dragon mart', 'carrefour',
+                           'lulu', 'spinneys', 'union coop', 'water delivery']),
+]
+
 
 def auto_categorize(store_name):
-    """Automatically categorize receipt based on store name (UAE Optimized - Enterprise Grade)"""
-    store_lower = store_name.lower()
-    
-    # Groceries & Hypermarkets
-    if any(word in store_lower for word in [
-        'carrefour', 'lulu', 'hypermarket', 'supermarket', 'grocery', 'market', 
-        'spinneys', 'waitrose', 'choithrams', 'viva', 'union coop', 'shaklan', 
-        'west zone', 'al maya', 'grand', 'baqer mohebi', 'emirates coop', 
-        'abu dhabi coop', 'km trading', 'nesto', 'safestway', 'talabat mart', 'instashop'
-    ]):
-        return 'Groceries'
-    
-    # Dining & Food (Restaurants, Cafes, Delivery)
-    if any(word in store_lower for word in [
-        'restaurant', 'cafe', 'coffee', 'mcdonald', 'kfc', 'pizza', 'burger', 
-        'dining', 'starbucks', 'costa', 'tim hortons', 'shawarma', 'cafeteria', 
-        'bakery', 'subway', 'hardees', 'popeyes', 'jollibee', 'nandos', 'five guys',
-        'shake shack', 'cheesecake factory', 'pf chang', 'paul', 'baskin robbins',
-        'dunkin', 'krispy kreme', 'talabat', 'deliveroo', 'noon food', 'zomato'
-    ]):
-        return 'Dining & Food'
-
-    # Transport & Logistics
-    if any(word in store_lower for word in [
-        'taxi', 'metro', 'rta', 'bus', 'transport', 'uber', 'careem', 'nol', 
-        'salik', 'sharjah taxi', 'hala', 'ajman taxi', 'darb', 'm-parking', 
-        'parking', 'valet', 'dhl', 'fedex', 'aramex', 'emirates post'
-    ]):
-        return 'Transport (Taxi/Metro)'
-    
-    # Fuel & Automotive
-    if any(word in store_lower for word in [
-        'petrol', 'enoc', 'eppco', 'adnoc', 'fuel', 'cafu', 'gas station', 
-        'autopro', 'wheel alignment', 'car wash', 'tyre', 'garage', 'auto repair'
-    ]):
-        return 'Fuel (Petrol)'
-    
-    # Utilities & Home Services
-    if any(word in store_lower for word in [
-        'dewa', 'sewa', 'fewa', 'addc', 'aadc', 'empower', 'emcool', 'gas', 'water',
-        'tabreed', 'cleaning', 'maid', 'laundry', 'dry clean', 'pest control', 'ac service'
-    ]):
-        return 'Utilities (DEWA/SEWA)'
-        
-    # Mobile & Telecom
-    if any(word in store_lower for word in [
-        'etisalat', 'du', 'virgin', 'upay', 'mobile', 'recharge', 'topup', 'telecom', 'e&'
-    ]):
-        return 'Mobile & Telecom'
-    
-    # Healthcare & Wellness
-    if any(word in store_lower for word in [
-        'pharmacy', 'hospital', 'clinic', 'medical', 'health', 'aster', 'life', 
-        'boots', 'binsina', 'mediclinic', 'thumbay', 'cleveland', 'dentist', 'optician',
-        'magrabi', 'fitness', 'gym', 'spa', 'salon', 'barber'
-    ]):
-        return 'Healthcare (Pharmacy)'
-    
-    # Shopping & Fashion
-    if any(word in store_lower for word in [
-        'mall', 'store', 'shop', 'boutique', 'fashion', 'zara', 'h&m', 'ikea', 
-        'noon', 'amazon', 'brands', 'clothing', 'shoe', 'nike', 'adidas', 'centerpoint',
-        'max fashion', 'splash', 'namshi', '6th street', 'sun & sand'
-    ]):
-        return 'Shopping & Fashion'
-        
-    # Electronics & Office
-    if any(word in store_lower for word in [
-        'sharaf', 'e-max', 'jumbo', 'electronics', 'apple', 'samsung', 
-        'virgin megastore', 'noon electronics', 'computer', 'mobile shop', 'printer'
-    ]):
-        return 'Electronics'
-    
-    # Housing & Real Estate
-    if any(word in store_lower for word in [
-        'rent', 'real estate', 'property', 'wasl', 'emaar', 'damac', 'nakheel', 'ejari'
-    ]):
-        return 'Housing & Rent'
-
-    # Government & Official
-    if any(word in store_lower for word in [
-        'dubai economy', 'mohre', 'ica', 'amer', 'tasheel', 'visa', 'typing', 
-        'court', 'police', 'fine', 'municipality', 'customs', 'chamber of commerce'
-    ]):
-        return 'Government Fees'
-    
-    # Entertainment & Leisure
-    if any(word in store_lower for word in [
-        'cinema', 'vox', 'reel', 'novo', 'theme park', 'dubai parks', 'global village',
-        'miracle garden', 'museum', 'expo', 'ticketing', 'entertainment', 'play'
-    ]):
-        return 'Entertainment'
-
+    name = f" {(store_name or '').lower()} "
+    for category, words in CATEGORY_KEYWORDS:
+        if any(word in name for word in words):
+            return category
     return 'Other'
 
 
 def allowed_file(filename):
-    """Check if file extension is allowed"""
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in Config.ALLOWED_EXTENSIONS
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in Config.ALLOWED_EXTENSIONS
+
+
+@receipts_bp.route('/files/<path:filename>', methods=['GET'])
+def serve_file(filename):
+    return send_from_directory(Config.UPLOAD_FOLDER, os.path.basename(filename))
 
 
 @receipts_bp.route('/upload', methods=['POST'])
-@jwt_required()
+@company_required()
 def upload_receipt():
-    """Upload and process a receipt image"""
-    user_id = get_jwt_identity()
     filepath = None
     try:
-        print(f"DEBUG: Starting upload for user {user_id}")
-        if 'file' not in request.files:
-            return jsonify({'error': 'No file provided'}), 400
-        
-        file = request.files['file']
-        
-        if file.filename == '':
+        file = request.files.get('file')
+        if not file or file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
-        
         if not allowed_file(file.filename):
             return jsonify({'error': 'Invalid file type. Allowed: png, jpg, jpeg, pdf'}), 400
-        
-        # Save locally temporarily for OCR and GCS upload
+
         filename = secure_filename(f"{uuid.uuid4()}_{file.filename}")
         temp_dir = "/tmp/receiptvault_uploads"
         os.makedirs(temp_dir, exist_ok=True)
         filepath = os.path.join(temp_dir, filename)
-        content_type = file.content_type
         file.save(filepath)
-        print(f"DEBUG: Saved temp file to {filepath}")
-        
-        # Process receipt with Document AI
-        receipt_data = ocr_service.parse_receipt(filepath)
-        print(f"DEBUG: OCR Extraction complete for {receipt_data.get('store_name')}")
-        
-        # 16K FX Intelligence: Convert to AED if necessary
-        currency = receipt_data.get('currency', 'AED')
-        original_amount = receipt_data.get('total_incl_vat', 0)
+
+        receipt_data = None
+        if ocr_service.available:
+            receipt_data = ocr_service.parse_receipt(filepath)
+            if str(receipt_data.get('store_name', '')).startswith('Error:'):
+                receipt_data = None
+        read_ok = receipt_data is not None
+        receipt_data = receipt_data or {}
+
+        currency = receipt_data.get('currency') or 'AED'
+        original_amount = receipt_data.get('total_incl_vat', 0) or 0
         total_aed, rate = fx_service.convert_to_aed(original_amount, currency)
-        print(f"DEBUG: FX Conversion: {original_amount} {currency} -> {total_aed} AED (rate {rate})")
-        
-        # Upload to GCS from the saved file path
-        public_url = upload_to_gcs(filepath, filename, content_type)
-        print(f"DEBUG: Uploaded to GCS: {public_url}")
-        
-        # Create receipt record
-        store_name = receipt_data.get('store_name', 'Unknown')
-        category = auto_categorize(store_name)
-        
+        vat_aed = round((receipt_data.get('vat_amount') or 0) * rate, 2)
+
+        image_url = store_file(filepath, filename, file.content_type)
+        store_name = receipt_data.get('store_name') or 'Unreadable receipt'
+
         receipt = Receipt(
-            user_id=user_id,
+            user_id=g.user_id,
+            company_id=g.company_id,
             receipt_id=str(uuid.uuid4()),
             store_name=store_name,
             address=receipt_data.get('address'),
             phone_number=receipt_data.get('phone_number'),
-            date=receipt_data.get('date', datetime.now().date()),
+            date=receipt_data.get('date') or datetime.now().date(),
             time=receipt_data.get('time'),
             currency=currency,
             exchange_rate=rate,
             original_amount=original_amount,
-            total_excl_vat=total_aed - (receipt_data.get('vat_amount', 0) * rate),
             total_incl_vat=total_aed,
+            vat_amount=vat_aed,
+            total_excl_vat=round(total_aed - vat_aed, 2),
             vat_rate=receipt_data.get('vat_rate', Config.VAT_RATE),
-            vat_amount=receipt_data.get('vat_amount', 0) * rate,
             payment_method=receipt_data.get('payment_method'),
-            transaction_trn=receipt_data.get('transaction_trn'),
-            image_path=public_url,
-            category=category,
-            raw_extraction=receipt_data.get('raw_extraction')
+            transaction_trn=normalize_trn(receipt_data.get('transaction_trn')),
+            image_path=image_url,
+            category=auto_categorize(store_name) if read_ok else 'Other',
+            raw_extraction=receipt_data.get('raw_extraction'),
+            status='pending',
+            notes=None if read_ok else "We couldn't read this receipt automatically. Please fill in the details.",
         )
-        
         db.session.add(receipt)
         db.session.flush()
-        print(f"DEBUG: Database Receipt created with ID {receipt.id}")
-        
-        # Immutable Audit Log
-        audit = AuditLog(
-            user_id=user_id,
-            action='CREATE',
-            resource_type='RECEIPT',
-            resource_id=receipt.receipt_id,
-            changes={'new': receipt.to_dict()},
-            ip_address=request.remote_addr
-        )
-        db.session.add(audit)
-        
-        # Add items
-        for item_data in receipt_data.get('items', []):
-            item = ReceiptItem(
+        for item in receipt_data.get('items', []):
+            db.session.add(ReceiptItem(
                 receipt_id=receipt.id,
-                item_name=item_data['item_name'],
-                quantity=item_data.get('quantity', 1),
-                price=item_data.get('price', 0)
-            )
-            db.session.add(item)
-        
+                item_name=item['item_name'],
+                quantity=item.get('quantity', 1),
+                price=item.get('price', 0),
+            ))
+        audit('CREATE', 'RECEIPT', receipt.receipt_id, {'source': 'upload', 'auto_read': read_ok})
         db.session.commit()
-        print(f"DEBUG: Transaction committed successfully")
-        
-        # Cleanup temp file
-        if os.path.exists(filepath):
-            os.remove(filepath)
-            
-        return jsonify({
-            'message': 'Receipt uploaded successfully',
-            'receipt': receipt.to_dict()
-        }), 201
-        
+        return jsonify({'message': 'Receipt uploaded', 'auto_read': read_ok, 'receipt': receipt.to_dict()}), 201
     except Exception as e:
-        print(f"ERROR in upload_receipt: {str(e)}")
-        import traceback
         traceback.print_exc()
-        if filepath and os.path.exists(filepath):
-            os.remove(filepath)
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
+    finally:
+        if filepath and os.path.exists(filepath):
+            os.remove(filepath)
+
+
+def _apply_amounts(receipt, data):
+    if 'total_incl_vat' in data:
+        receipt.total_incl_vat = round(float(data['total_incl_vat'] or 0), 2)
+        receipt.original_amount = receipt.total_incl_vat if (receipt.currency or 'AED') == 'AED' else receipt.original_amount
+    if 'vat_amount' in data:
+        receipt.vat_amount = round(float(data['vat_amount'] or 0), 2)
+    if 'total_incl_vat' in data or 'vat_amount' in data:
+        receipt.total_excl_vat = round(float(receipt.total_incl_vat or 0) - float(receipt.vat_amount or 0), 2)
+        net = float(receipt.total_excl_vat)
+        receipt.vat_rate = round(float(receipt.vat_amount or 0) / net * 100, 2) if net > 0 else 0
 
 
 @receipts_bp.route('/manual', methods=['POST'])
-@jwt_required()
+@company_required()
 def create_manual_receipt():
-    """Create a manual receipt entry without an image"""
-    user_id = get_jwt_identity()
     try:
-        data = request.get_json()
-        
-        store_name = data.get('store_name', 'Manual Entry')
-        total_incl_vat = float(data.get('total_incl_vat', 0))
-        vat_amount = float(data.get('vat_amount', 0))
-        category = data.get('category') or auto_categorize(store_name)
+        data = request.get_json() or {}
+        store_name = (data.get('store_name') or '').strip() or 'Manual entry'
         date_str = data.get('date')
-        
-        receipt_date = datetime.fromisoformat(date_str).date() if date_str else datetime.now().date()
-        
         receipt = Receipt(
-            user_id=user_id,
+            user_id=g.user_id,
+            company_id=g.company_id,
             receipt_id=str(uuid.uuid4()),
             store_name=store_name,
-            date=receipt_date,
-            total_incl_vat=total_incl_vat,
-            vat_amount=vat_amount,
-            total_excl_vat=total_incl_vat - vat_amount,
-            vat_rate=round((vat_amount / (total_incl_vat - vat_amount) * 100), 1) if (total_incl_vat - vat_amount) > 0 else 5.0,
-            category=category,
+            transaction_trn=normalize_trn(data.get('transaction_trn')),
+            date=datetime.fromisoformat(date_str).date() if date_str else datetime.now().date(),
+            currency='AED',
+            exchange_rate=1.0,
+            total_incl_vat=0,
+            vat_amount=0,
+            total_excl_vat=0,
+            category=data.get('category') or auto_categorize(store_name),
             payment_method=data.get('payment_method', 'Cash'),
-            notes=data.get('notes', 'Manual entry'),
-            image_path=None
+            notes=data.get('notes'),
+            status='pending',
         )
-        
+        _apply_amounts(receipt, {'total_incl_vat': data.get('total_incl_vat', 0), 'vat_amount': data.get('vat_amount', 0)})
         db.session.add(receipt)
+        db.session.flush()
+        audit('CREATE', 'RECEIPT', receipt.receipt_id, {'source': 'manual'})
         db.session.commit()
-        
-        return jsonify({
-            'message': 'Manual entry created successfully',
-            'receipt': receipt.to_dict()
-        }), 201
-        
+        return jsonify({'message': 'Receipt added', 'receipt': receipt.to_dict()}), 201
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
 
 @receipts_bp.route('/', methods=['GET'])
-@jwt_required()
+@company_required()
 def get_receipts():
-    """Get all receipts with optional filters including item-level search"""
-    user_id = get_jwt_identity()
     try:
-        category = request.args.get('category')
-        start_date = request.args.get('start_date')
-        end_date = request.args.get('end_date')
-        store_name = request.args.get('store_name')
-        item_name = request.args.get('item_name')
-        
-        print(f"DEBUG: Fetching receipts for user {user_id} with filters: cat={category}, store={store_name}, item={item_name}")
-        
-        query = Receipt.query.filter_by(user_id=user_id)
-        
-        if category and category != 'all' and category != '':
-            query = query.filter(Receipt.category == category)
-        
-        if start_date and start_date != '':
-            try:
-                query = query.filter(Receipt.date >= datetime.fromisoformat(start_date).date())
-            except Exception as e:
-                print(f"DEBUG: Invalid start_date {start_date}: {e}")
-                
-        if end_date and end_date != '':
-            try:
-                query = query.filter(Receipt.date <= datetime.fromisoformat(end_date).date())
-            except Exception as e:
-                print(f"DEBUG: Invalid end_date {end_date}: {e}")
-                
-        if store_name and store_name != '':
-            query = query.filter(Receipt.store_name.ilike(f'%{store_name}%'))
-        
-        # Deep Search: Filter receipts that contain a specific item
-        if item_name and item_name != '':
-            query = query.join(ReceiptItem).filter(ReceiptItem.item_name.ilike(f'%{item_name}%'))
-        
-        receipts = query.order_by(Receipt.date.desc()).distinct().all()
-        print(f"DEBUG: Found {len(receipts)} receipts")
-        
-        return jsonify({
-            'receipts': [receipt.to_dict() for receipt in receipts],
-            'count': len(receipts)
-        }), 200
-        
+        args = request.args
+        query = receipt_scope(Receipt.query, Receipt)
+        if args.get('category') and args.get('category') != 'all':
+            query = query.filter(Receipt.category == args['category'])
+        if args.get('status') and args.get('status') != 'all':
+            query = query.filter(Receipt.status == args['status'])
+        if args.get('start_date'):
+            query = query.filter(Receipt.date >= datetime.fromisoformat(args['start_date']).date())
+        if args.get('end_date'):
+            query = query.filter(Receipt.date <= datetime.fromisoformat(args['end_date']).date())
+        if args.get('store_name'):
+            query = query.filter(Receipt.store_name.ilike(f"%{args['store_name']}%"))
+        if args.get('item_name'):
+            query = query.join(ReceiptItem).filter(ReceiptItem.item_name.ilike(f"%{args['item_name']}%"))
+
+        receipts = [r for r in query.order_by(Receipt.date.desc(), Receipt.id.desc()).distinct().all()]
+        if args.get('issue') == 'missing_trn':
+            receipts = [r for r in receipts if r.vat_issue == 'missing_trn']
+        return jsonify({'receipts': [r.to_dict() for r in receipts], 'count': len(receipts)}), 200
     except Exception as e:
-        print(f"ERROR in get_receipts: {str(e)}")
-        import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 
+def _find(receipt_id):
+    return receipt_scope(Receipt.query, Receipt).filter(Receipt.receipt_id == receipt_id).first()
+
+
 @receipts_bp.route('/<receipt_id>', methods=['GET'])
-@jwt_required()
+@company_required()
 def get_receipt(receipt_id):
-    """Get a specific receipt by ID"""
-    user_id = get_jwt_identity()
-    try:
-        receipt = Receipt.query.filter_by(receipt_id=receipt_id, user_id=user_id).first()
-        if not receipt:
-            return jsonify({'error': 'Receipt not found'}), 404
-        return jsonify(receipt.to_dict()), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    receipt = _find(receipt_id)
+    if not receipt:
+        return jsonify({'error': 'Receipt not found'}), 404
+    return jsonify(receipt.to_dict()), 200
 
 
 @receipts_bp.route('/<receipt_id>', methods=['PUT'])
-@jwt_required()
+@company_required()
 def update_receipt(receipt_id):
-    """Update receipt details"""
-    user_id = get_jwt_identity()
     try:
-        receipt = Receipt.query.filter_by(receipt_id=receipt_id, user_id=user_id).first()
+        receipt = _find(receipt_id)
         if not receipt:
             return jsonify({'error': 'Receipt not found'}), 404
-        
-        data = request.get_json()
-        before_snapshot = receipt.to_dict()
+        if g.role == 'staff' and receipt.status == 'approved':
+            return jsonify({'error': 'Approved receipts can only be changed by the owner or accountant'}), 403
 
+        data = request.get_json() or {}
+        before = receipt.to_dict()
         if 'store_name' in data:
-            receipt.store_name = data['store_name']
-            if not data.get('category'): # Only re-categorize if not manually specified
-                receipt.category = auto_categorize(data['store_name'])
-        if 'category' in data:
+            receipt.store_name = (data['store_name'] or '').strip() or receipt.store_name
+            if not data.get('category'):
+                receipt.category = auto_categorize(receipt.store_name)
+        if data.get('category'):
             receipt.category = data['category']
-        if 'date' in data:
+        if 'transaction_trn' in data:
+            receipt.transaction_trn = normalize_trn(data['transaction_trn'])
+        if data.get('date'):
             receipt.date = datetime.fromisoformat(data['date']).date()
-        if 'total_incl_vat' in data:
-            receipt.total_incl_vat = float(data['total_incl_vat'])
-        if 'vat_amount' in data:
-            receipt.vat_amount = float(data['vat_amount'])
-            receipt.total_excl_vat = receipt.total_incl_vat - receipt.vat_amount
-            if receipt.total_excl_vat > 0:
-                receipt.vat_rate = (receipt.vat_amount / receipt.total_excl_vat) * 100
+        _apply_amounts(receipt, data)
         if 'notes' in data:
             receipt.notes = data['notes']
         if 'payment_method' in data:
             receipt.payment_method = data['payment_method']
-        
-        db.session.commit()
+        if g.role == 'staff' and receipt.status == 'rejected':
+            receipt.status = 'pending'
 
-        # Immutable Audit Log
-        audit = AuditLog(
-            user_id=user_id,
-            action='UPDATE',
-            resource_type='RECEIPT',
-            resource_id=receipt.receipt_id,
-            changes={'before': before_snapshot, 'after': receipt.to_dict()},
-            ip_address=request.remote_addr
-        )
-        db.session.add(audit)
+        audit('UPDATE', 'RECEIPT', receipt.receipt_id, {'before': before, 'after': receipt.to_dict()})
         db.session.commit()
-        return jsonify({
-            'message': 'Receipt updated successfully',
-            'receipt': receipt.to_dict()
-        }), 200
+        return jsonify({'message': 'Receipt updated', 'receipt': receipt.to_dict()}), 200
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
 
+@receipts_bp.route('/<receipt_id>/review', methods=['POST'])
+@company_required(roles=('owner', 'accountant'))
+def review_receipt(receipt_id):
+    receipt = _find(receipt_id)
+    if not receipt:
+        return jsonify({'error': 'Receipt not found'}), 404
+    data = request.get_json() or {}
+    status = data.get('status')
+    if status not in REVIEW_STATUSES:
+        return jsonify({'error': 'Status must be pending, approved or rejected'}), 400
+    receipt.status = status
+    receipt.review_note = data.get('note') or None
+    receipt.reviewed_by = g.user_id if status != 'pending' else None
+    receipt.reviewed_at = datetime.utcnow() if status != 'pending' else None
+    audit('REVIEW', 'RECEIPT', receipt.receipt_id, {'status': status, 'note': receipt.review_note})
+    db.session.commit()
+    return jsonify({'receipt': receipt.to_dict()}), 200
+
+
 @receipts_bp.route('/<receipt_id>', methods=['DELETE'])
-@jwt_required()
+@company_required()
 def delete_receipt(receipt_id):
-    """Delete a receipt"""
-    user_id = get_jwt_identity()
     try:
-        receipt = Receipt.query.filter_by(receipt_id=receipt_id, user_id=user_id).first()
+        receipt = _find(receipt_id)
         if not receipt:
             return jsonify({'error': 'Receipt not found'}), 404
-        
-        if receipt.image_path:
-            delete_from_gcs(receipt.image_path)
-        
-        # Immutable Audit Log
-        audit = AuditLog(
-            user_id=user_id,
-            action='DELETE',
-            resource_type='RECEIPT',
-            resource_id=receipt.receipt_id,
-            changes={'deleted': receipt.to_dict()},
-            ip_address=request.remote_addr
-        )
-        db.session.add(audit)
-        
+        if g.role == 'staff' and receipt.status == 'approved':
+            return jsonify({'error': 'Approved receipts can only be deleted by the owner or accountant'}), 403
+        delete_file(receipt.image_path)
+        audit('DELETE', 'RECEIPT', receipt.receipt_id, {'deleted': receipt.to_dict()})
         db.session.delete(receipt)
         db.session.commit()
-        return jsonify({'message': 'Receipt deleted successfully'}), 200
+        return jsonify({'message': 'Receipt deleted'}), 200
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 500

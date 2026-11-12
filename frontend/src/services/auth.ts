@@ -1,58 +1,56 @@
-import api from './api';
-
-export interface User {
-  id: number;
-  email: string;
-  name: string;
-  is_guest: boolean;
-  preferred_currency: string;
-}
+import api from './api'
+import type { Company, User } from '../lib/types'
 
 export interface AuthResponse {
-  user: User;
-  access_token: string;
+  user: User
+  companies: Company[]
+  access_token: string
 }
 
-export const login = async (email: string, password: string): Promise<AuthResponse> => {
-  const response = await api.post('/auth/login', { email, password });
-  const { user, access_token } = response.data;
-  localStorage.setItem('token', access_token);
-  localStorage.setItem('user', JSON.stringify(user));
-  return response.data;
-};
+const persist = (data: AuthResponse) => {
+  localStorage.setItem('token', data.access_token)
+  localStorage.setItem('user', JSON.stringify(data.user))
+  saveCompanies(data.companies)
+  return data
+}
 
-export const register = async (email: string, password: string, name: string): Promise<AuthResponse> => {
-  const response = await api.post('/auth/register', { email, password, name });
-  const { user, access_token } = response.data;
-  localStorage.setItem('token', access_token);
-  localStorage.setItem('user', JSON.stringify(user));
-  return response.data;
-};
+export const saveCompanies = (companies: Company[]) => {
+  localStorage.setItem('companies', JSON.stringify(companies))
+  const active = localStorage.getItem('companyId')
+  if (!companies.some((c) => String(c.id) === active) && companies.length) {
+    localStorage.setItem('companyId', String(companies[0].id))
+  }
+}
 
-export const guestLogin = async (): Promise<AuthResponse> => {
-  const response = await api.post('/auth/guest-login');
-  const { user, access_token } = response.data;
-  localStorage.setItem('token', access_token);
-  localStorage.setItem('user', JSON.stringify(user));
-  return response.data;
-};
+export const login = async (email: string, password: string) =>
+  persist((await api.post('/auth/login', { email, password })).data)
+
+export const register = async (data: {
+  email: string
+  password: string
+  name: string
+  company_name: string
+  company_trn?: string
+}) => persist((await api.post('/auth/register', data)).data)
+
+export const guestLogin = async () => persist((await api.post('/auth/guest-login')).data)
 
 export const logout = () => {
-  localStorage.removeItem('token');
-  localStorage.removeItem('user');
-  window.location.href = '/login';
-};
+  ;['token', 'user', 'companies', 'companyId'].forEach((k) => localStorage.removeItem(k))
+  window.location.href = '/'
+}
 
-export const getCurrentUser = (): User | null => {
-  const userStr = localStorage.getItem('user');
-  if (!userStr) return null;
+const read = <T,>(key: string): T | null => {
   try {
-    return JSON.parse(userStr);
+    const raw = localStorage.getItem(key)
+    return raw ? (JSON.parse(raw) as T) : null
   } catch {
-    return null;
+    return null
   }
-};
+}
 
-export const isAuthenticated = (): boolean => {
-  return !!localStorage.getItem('token');
-};
+export const getCurrentUser = () => read<User>('user')
+export const getStoredCompanies = () => read<Company[]>('companies') || []
+export const getActiveCompanyId = () => Number(localStorage.getItem('companyId')) || null
+export const setActiveCompanyId = (id: number) => localStorage.setItem('companyId', String(id))
+export const isAuthenticated = () => !!localStorage.getItem('token')

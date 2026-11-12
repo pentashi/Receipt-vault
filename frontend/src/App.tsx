@@ -1,302 +1,218 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { Toaster } from 'react-hot-toast'
+import { Check, ChevronsUpDown, Landmark, LayoutDashboard, LogOut, Receipt, ScanLine, Users } from 'lucide-react'
+import Login from './components/Login'
 import Dashboard from './components/Dashboard'
 import ReceiptUpload from './components/ReceiptUpload'
-import ReceiptList from './components/ReceiptList'
-import BudgetManager from './components/BudgetManager'
-import Login from './components/Login'
-import { Upload, Receipt, PieChart, TrendingUp, Bell, Sun, Moon, Menu, X, AlertTriangle, LogOut } from 'lucide-react'
-import { getBudgetAlerts } from './services/api'
-import { isAuthenticated, logout, getCurrentUser } from './services/auth'
-import { Toaster } from 'react-hot-toast'
+import ReceiptList, { type ReceiptFilter } from './components/ReceiptList'
+import VatReturn from './components/VatReturn'
+import Team from './components/Team'
+import { Wordmark } from './components/Brand'
+import { getCompanies } from './services/api'
+import {
+  getActiveCompanyId, getCurrentUser, getStoredCompanies, isAuthenticated, logout,
+  saveCompanies, setActiveCompanyId, type AuthResponse,
+} from './services/auth'
+import { ROLE_LABELS } from './lib/format'
+import type { Company, User } from './lib/types'
 
-type TabType = 'dashboard' | 'upload' | 'receipts' | 'budgets'
+export type Tab = 'overview' | 'scan' | 'receipts' | 'vat' | 'team'
 
-function App() {
-  const [isAuth, setIsAuth] = useState(isAuthenticated())
-  const [user, setUser] = useState(getCurrentUser())
-  const [navOpen, setNavOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState<TabType>('dashboard')
-  const [alerts, setAlerts] = useState<any[]>([])
-  const [showAlerts, setShowAlerts] = useState(false)
-  const [showUserMenu, setShowUserMenu] = useState(false)
-  const [darkMode, setDarkMode] = useState(() => {
-    const saved = localStorage.getItem('darkMode')
-    return saved ? JSON.parse(saved) : false
-  })
+const NAV: { id: Tab; label: string; icon: typeof LayoutDashboard }[] = [
+  { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+  { id: 'scan', label: 'Add receipt', icon: ScanLine },
+  { id: 'receipts', label: 'Receipts', icon: Receipt },
+  { id: 'vat', label: 'VAT return', icon: Landmark },
+  { id: 'team', label: 'Team & company', icon: Users },
+]
 
+const TITLES: Record<Tab, { title: string; sub: string }> = {
+  overview: { title: 'Overview', sub: 'This VAT quarter at a glance' },
+  scan: { title: 'Add a receipt', sub: 'Scan it or type it in' },
+  receipts: { title: 'Receipts', sub: 'Every receipt your team has uploaded' },
+  vat: { title: 'VAT return', sub: 'Input VAT you can recover this quarter' },
+  team: { title: 'Team & company', sub: 'Company details, people and access' },
+}
+
+function CompanySwitcher({ companies, active, onSelect }: { companies: Company[]; active: Company; onSelect: (id: number) => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (darkMode) {
-      document.documentElement.classList.add('dark')
-    } else {
-      document.documentElement.classList.remove('dark')
-    }
-    localStorage.setItem('darkMode', JSON.stringify(darkMode))
-  }, [darkMode])
-
-  useEffect(() => {
-    if (isAuth) {
-      loadAlerts()
-      const interval = setInterval(loadAlerts, 30000)
-      return () => clearInterval(interval)
-    }
-  }, [isAuth])
-
-  useEffect(() => {
-    if (isAuth) {
-      loadAlerts()
-    }
-  }, [activeTab, isAuth])
-
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      const target = e.target as HTMLElement
-      if (showAlerts && !target.closest('.alerts-dropdown')) {
-        setShowAlerts(false)
-      }
-      if (showUserMenu && !target.closest('.user-menu')) {
-        setShowUserMenu(false)
-      }
-    }
-    document.addEventListener('click', handleClickOutside)
-    return () => document.removeEventListener('click', handleClickOutside)
-  }, [showAlerts, showUserMenu])
-
-  const loadAlerts = async () => {
-    try {
-      const data = await getBudgetAlerts()
-      setAlerts(data.alerts || [])
-    } catch (error) {
-      console.error('Error loading alerts:', error)
-    }
-  }
-
-  const handleLoginSuccess = () => {
-    setIsAuth(true)
-    setUser(getCurrentUser())
-  }
-
-  const handleLogout = () => {
-    logout()
-    setIsAuth(false)
-    setUser(null)
-  }
-
-  if (!isAuth) {
-    return (
-      <>
-        <Toaster position="top-right" />
-        <Login onLoginSuccess={handleLoginSuccess} />
-      </>
-    )
-  }
-
+    const close = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && setOpen(false)
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [])
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 transition-colors duration-300 w-full">
-      <div className="w-full max-w-screen-lg mx-auto px-2">
-        <Toaster position="top-right" toastOptions={{ duration: 4000 }} />
-        
-        {/* Header */}
-        <header className="bg-white dark:bg-gray-900 border-b dark:border-gray-800 sticky top-0 z-50">
-          <div className="container mx-auto px-4 py-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <div className="bg-primary-600 p-2 rounded-xl">
-                  <Receipt className="w-6 h-6 text-white" />
-                </div>
-                <h1 className="text-xl font-black text-gray-900 dark:text-white tracking-tight">ReceiptVault</h1>
-              </div>
-              
-              <div className="flex items-center space-x-2">
-                {/* Theme Toggle */}
-                <button
-                  onClick={() => setDarkMode(!darkMode)}
-                  className="p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl transition-all"
-                  aria-label="Toggle dark mode"
-                >
-                  {darkMode ? <Sun className="w-5 h-5 text-yellow-400" /> : <Moon className="w-5 h-5" />}
-                </button>
-
-                {/* Notification Bell */}
-                <div className="relative alerts-dropdown">
-                  <button
-                    onClick={() => setShowAlerts(!showAlerts)}
-                    className={`relative p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl transition-all ${
-                      alerts.length > 0 ? 'animate-pulse' : ''
-                    }`}
-                  >
-                    <Bell className={`w-5 h-5 ${alerts.length > 0 ? 'text-red-500' : ''}`} />
-                    {alerts.length > 0 && (
-                      <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
-                    )}
-                  </button>
-
-                  {/* Alerts Dropdown */}
-                  {showAlerts && (
-                    <div className="absolute right-0 mt-3 w-80 bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border dark:border-gray-800 z-50 overflow-hidden">
-                      <div className="p-4 border-b dark:border-gray-800">
-                        <h3 className="font-bold text-gray-900 dark:text-white">Budget Alerts</h3>
-                      </div>
-                      
-                      {alerts.length === 0 ? (
-                        <div className="p-8 text-center text-gray-500 dark:text-gray-400">
-                          <p className="text-sm font-medium">You're all set! No alerts. 🎉</p>
-                        </div>
-                      ) : (
-                        <div className="max-h-96 overflow-y-auto">
-                          {alerts.map((alert, idx) => (
-                            <div
-                              key={idx}
-                              className={`p-4 border-b dark:border-gray-800 last:border-b-0 ${
-                                alert.alert_type === 'exceeded'
-                                  ? 'bg-red-50 dark:bg-red-950/20'
-                                  : 'bg-yellow-50 dark:bg-yellow-950/20'
-                              }`}
-                            >
-                              <div className="flex items-start space-x-3">
-                                <div className={`p-1.5 rounded-lg ${alert.alert_type === 'exceeded' ? 'bg-red-100 dark:bg-red-900/40 text-red-600' : 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-600'}`}>
-                                  <AlertTriangle className="w-4 h-4" />
-                                </div>
-                                <div className="flex-1">
-                                  <p className="text-sm font-bold text-gray-900 dark:text-white">{alert.category}</p>
-                                  <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">{alert.message}</p>
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* User Menu */}
-                <div className="relative user-menu ml-2">
-                  <button
-                    onClick={() => setShowUserMenu(!showUserMenu)}
-                    className="flex items-center space-x-2 p-1 pl-2 pr-3 bg-gray-50 dark:bg-gray-800 border dark:border-gray-700 rounded-2xl hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-all"
-                  >
-                    <div className="w-8 h-8 rounded-xl bg-primary-100 dark:bg-primary-900/40 flex items-center justify-center text-primary-600 dark:text-primary-400 font-bold text-sm">
-                      {user?.name?.charAt(0) || 'U'}
-                    </div>
-                    <span className="hidden md:block text-sm font-bold text-gray-700 dark:text-gray-300 max-w-[100px] truncate">
-                      {user?.name || 'User'}
-                    </span>
-                  </button>
-
-                  {showUserMenu && (
-                    <div className="absolute right-0 mt-3 w-56 bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border dark:border-gray-800 z-50 overflow-hidden">
-                      <div className="p-4 border-b dark:border-gray-800">
-                        <p className="text-sm font-black text-gray-900 dark:text-white truncate">{user?.name}</p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">{user?.email}</p>
-                        {user?.is_guest && (
-                          <span className="inline-block mt-2 px-2 py-0.5 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 text-[10px] font-black uppercase tracking-wider rounded-md">
-                            Guest Session
-                          </span>
-                        )}
-                      </div>
-                      <div className="p-2">
-                        <button
-                          onClick={handleLogout}
-                          className="w-full flex items-center space-x-3 px-3 py-2.5 text-sm font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-xl transition-all"
-                        >
-                          <LogOut className="w-4 h-4" />
-                          <span>Sign Out</span>
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </header>
-
-        {/* Navigation */}
-        <nav className="bg-white dark:bg-gray-900 border-b dark:border-gray-800 mb-6">
-          <div className="w-full">
-            <div className="hidden sm:flex items-center space-x-1 p-1">
-              {[
-                { id: 'dashboard', label: 'Dashboard', icon: TrendingUp },
-                { id: 'upload', label: 'Upload', icon: Upload },
-                { id: 'receipts', label: 'Receipts', icon: Receipt },
-                { id: 'budgets', label: 'Budgets', icon: PieChart },
-              ].map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id as TabType)}
-                  className={`flex items-center space-x-2 px-6 py-3 rounded-xl font-bold transition-all ${
-                    activeTab === tab.id
-                      ? 'bg-primary-50 dark:bg-primary-950/30 text-primary-600 dark:text-primary-400'
-                      : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
-                  }`}
-                >
-                  <tab.icon className="w-4 h-4" />
-                  <span className="text-sm">{tab.label}</span>
-                </button>
-              ))}
-            </div>
-            
-            {/* Mobile Nav */}
-            <div className="sm:hidden flex items-center justify-between p-2">
-              <button
-                onClick={() => setActiveTab('dashboard')}
-                className={`flex items-center space-x-2 px-4 py-3 rounded-xl font-bold ${
-                  activeTab === 'dashboard' ? 'text-primary-600 bg-primary-50 dark:bg-primary-950/30' : 'text-gray-500'
-                }`}
-              >
-                <TrendingUp className="w-4 h-4" />
-                <span>Dashboard</span>
-              </button>
-              <button
-                onClick={() => setNavOpen(!navOpen)}
-                className="p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl"
-              >
-                {navOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-              </button>
-            </div>
-
-            {navOpen && (
-              <div className="sm:hidden p-2 space-y-1 bg-white dark:bg-gray-900 border-t dark:border-gray-800">
-                {[
-                  { id: 'upload', label: 'Upload Receipt', icon: Upload },
-                  { id: 'receipts', label: 'My Receipts', icon: Receipt },
-                  { id: 'budgets', label: 'Budgets', icon: PieChart },
-                ].map((tab) => (
-                  <button
-                    key={tab.id}
-                    onClick={() => { setActiveTab(tab.id as TabType); setNavOpen(false); }}
-                    className={`flex items-center space-x-3 w-full px-4 py-3 rounded-xl font-bold ${
-                      activeTab === tab.id
-                        ? 'bg-primary-50 dark:bg-primary-950/30 text-primary-600'
-                        : 'text-gray-500'
-                    }`}
-                  >
-                    <tab.icon className="w-5 h-5" />
-                    <span>{tab.label}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </nav>
-
-        {/* Main Content */}
-        <main className="w-full pb-12">
-          {activeTab === 'dashboard' && <Dashboard />}
-          {activeTab === 'upload' && <ReceiptUpload onUploadSuccess={() => setActiveTab('receipts')} />}
-          {activeTab === 'receipts' && <ReceiptList />}
-          {activeTab === 'budgets' && <BudgetManager />}
-        </main>
-
-        {/* Footer */}
-        <footer className="py-12 border-t dark:border-gray-800 text-center">
-          <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
-            © 2026 ReceiptVault • Made with ❤️ in UAE
-          </p>
-        </footer>
-      </div>
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-left transition hover:bg-white/10"
+      >
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gold-400/15 font-display text-sm font-semibold text-gold-300">
+          {active.name.slice(0, 2).toUpperCase()}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-semibold text-white">{active.name}</div>
+          <div className="text-xs text-night-300">{active.emirate} · {ROLE_LABELS[active.role]}</div>
+        </div>
+        <ChevronsUpDown className="h-4 w-4 text-night-300" />
+      </button>
+      {open && (
+        <div className="absolute left-0 right-0 z-50 mt-2 overflow-hidden rounded-xl border border-sand-200 bg-white py-1 shadow-xl">
+          {companies.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => { onSelect(c.id); setOpen(false) }}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-sand-100"
+            >
+              <span className="flex-1 truncate font-medium text-night-900">{c.name}</span>
+              <span className="text-xs text-night-400">{ROLE_LABELS[c.role]}</span>
+              {c.id === active.id && <Check className="h-4 w-4 text-gold-600" />}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
 
-export default App
+export default function App() {
+  const [authed, setAuthed] = useState(isAuthenticated())
+  const [user, setUser] = useState<User | null>(getCurrentUser())
+  const [companies, setCompanies] = useState<Company[]>(getStoredCompanies())
+  const [activeId, setActiveId] = useState<number | null>(getActiveCompanyId())
+  const [tab, setTab] = useState<Tab>('overview')
+  const [receiptFilter, setReceiptFilter] = useState<ReceiptFilter>({})
+
+  const refreshCompanies = async (selectId?: number) => {
+    const { companies: list } = await getCompanies()
+    if (selectId) setActiveCompanyId(selectId)
+    saveCompanies(list)
+    setCompanies(list)
+    setActiveId(getActiveCompanyId())
+  }
+
+  useEffect(() => {
+    if (authed) refreshCompanies().catch(() => undefined)
+  }, [authed])
+
+  const handleLogin = (data: AuthResponse) => {
+    setUser(data.user)
+    setCompanies(data.companies)
+    setActiveId(getActiveCompanyId())
+    setTab('overview')
+    setAuthed(true)
+  }
+
+  const go = (next: Tab, filter: ReceiptFilter = {}) => {
+    setReceiptFilter(filter)
+    setTab(next)
+    window.scrollTo({ top: 0 })
+  }
+
+  const selectCompany = (id: number) => {
+    setActiveCompanyId(id)
+    setActiveId(id)
+    go('overview')
+  }
+
+  const company = companies.find((c) => c.id === activeId) || companies[0]
+
+  if (!authed || !user || !company) return <Login onLogin={handleLogin} />
+
+  return (
+    <div className="min-h-screen bg-sand-100 text-night-900">
+      <Toaster position="top-right" toastOptions={{ style: { borderRadius: 12, fontSize: 14 } }} />
+
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-72 flex-col bg-night-950 lg:flex">
+        <div className="pattern-mashrabiya pointer-events-none absolute inset-0 opacity-[0.05]" />
+        <div className="relative flex h-full flex-col p-5">
+          <div className="px-1 pb-6 pt-1"><Wordmark light /></div>
+          <CompanySwitcher companies={companies} active={company} onSelect={selectCompany} />
+          <nav className="mt-6 space-y-1">
+            {NAV.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                onClick={() => go(id)}
+                className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${
+                  tab === id ? 'bg-gold-400/15 text-gold-200' : 'text-night-200 hover:bg-white/5 hover:text-white'
+                }`}
+              >
+                <Icon className={`h-[18px] w-[18px] ${tab === id ? 'text-gold-300' : ''}`} />
+                {label}
+                {tab === id && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-gold-300" />}
+              </button>
+            ))}
+          </nav>
+          <div className="mt-auto rounded-xl border border-white/10 bg-white/5 p-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-night-700 text-sm font-semibold text-white">
+                {(user.name || user.email).slice(0, 1).toUpperCase()}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-semibold text-white">{user.name || 'You'}</div>
+                <div className="truncate text-xs text-night-300">{user.is_guest ? 'Demo account' : user.email}</div>
+              </div>
+              <button onClick={logout} className="rounded-lg p-2 text-night-300 hover:bg-white/10 hover:text-white" title="Sign out">
+                <LogOut className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <div className="lg:pl-72">
+        <header className="sticky top-0 z-30 border-b border-sand-200 bg-sand-100/85 backdrop-blur">
+          <div className="mx-auto flex max-w-6xl items-center gap-4 px-4 py-4 sm:px-8">
+            <div className="lg:hidden"><Wordmark /></div>
+            <div className="hidden lg:block">
+              <h1 className="font-display text-2xl font-semibold">{TITLES[tab].title}</h1>
+              <p className="text-sm text-night-500">{TITLES[tab].sub}</p>
+            </div>
+            <div className="ml-auto flex items-center gap-3">
+              <div className="hidden text-right sm:block">
+                <div className="font-arabic text-sm text-gold-600" dir="rtl">مرحبا</div>
+                <div className="text-xs text-night-500">{company.name}</div>
+              </div>
+              <button onClick={logout} className="btn-ghost px-3 lg:hidden" title="Sign out"><LogOut className="h-4 w-4" /></button>
+            </div>
+          </div>
+        </header>
+
+        {company.is_demo && (
+          <div className="mx-auto max-w-6xl px-4 pt-5 sm:px-8">
+            <div className="flex items-center gap-3 rounded-xl border border-gold-200 bg-gold-50 px-4 py-2.5 text-sm text-gold-800">
+              <span className="chip shrink-0 bg-gold-400 text-night-950">Demo</span>
+              <span>You're exploring <b>{company.name}</b>, a sample Dubai trading company. Changes are private to you.</span>
+            </div>
+          </div>
+        )}
+
+        <main key={company.id} className="mx-auto max-w-6xl px-4 pb-28 pt-6 sm:px-8 lg:pb-12">
+          <div className="mb-5 lg:hidden">
+            <h1 className="font-display text-2xl font-semibold">{TITLES[tab].title}</h1>
+            <p className="text-sm text-night-500">{TITLES[tab].sub}</p>
+          </div>
+          {tab === 'overview' && <Dashboard company={company} onNavigate={go} />}
+          {tab === 'scan' && <ReceiptUpload onDone={() => go('receipts')} />}
+          {tab === 'receipts' && <ReceiptList role={company.role} initialFilter={receiptFilter} />}
+          {tab === 'vat' && <VatReturn role={company.role} onOpenReceipts={(f) => go('receipts', f)} />}
+          {tab === 'team' && <Team company={company} user={user} onCompaniesChanged={refreshCompanies} />}
+          <footer className="mt-12 flex flex-wrap items-center justify-between gap-2 border-t border-sand-200 pt-5 text-xs text-night-400">
+            <span>ReceiptVault · Built for UAE businesses · VAT at 5%</span>
+            <span className="font-arabic" dir="rtl">صُنع في الإمارات</span>
+          </footer>
+        </main>
+      </div>
+
+      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-night-800 bg-night-950 px-1 pb-[env(safe-area-inset-bottom)] lg:hidden">
+        {NAV.map(({ id, label, icon: Icon }) => (
+          <button key={id} onClick={() => go(id)} className={`flex flex-col items-center gap-1 py-2.5 text-[10px] font-medium ${tab === id ? 'text-gold-300' : 'text-night-300'}`}>
+            <Icon className="h-5 w-5" />
+            {label.split(' ')[0]}
+          </button>
+        ))}
+      </nav>
+    </div>
+  )
+}
