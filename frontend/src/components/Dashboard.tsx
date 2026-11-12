@@ -44,7 +44,8 @@ export default function Dashboard({ company, onNavigate }: { company: Company; o
 
   const days = daysUntil(summary.period.due_date)
   const missingTrn = summary.issues.find((i) => i.type === 'missing_trn')
-  const lost = Math.max(0, summary.totals.vat - summary.claimable.vat)
+  const pendingVat = summary.issues.find((i) => i.type === 'pending_review')?.vat ?? 0
+  const lost = Math.max(0, summary.totals.vat - summary.claimable.vat - pendingVat)
   const maxCat = Math.max(1, ...summary.by_category.map((c) => c.net + c.vat))
   const isEmpty = summary.totals.count === 0 && summary.pending_review === 0
 
@@ -88,7 +89,7 @@ export default function Dashboard({ company, onNavigate }: { company: Company; o
           <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Stat label="Spend this quarter" value={aed(summary.totals.gross, 0)} hint={`${summary.totals.count} receipts incl. VAT`} />
             <Stat label="Input VAT paid" value={aed(summary.totals.vat)} hint="5% VAT on your purchases" />
-            <Stat label="Recoverable VAT" value={aed(summary.claimable.vat)} hint={summary.pending_review ? `Valid TRN · ${summary.pending_review} still pending review` : 'Valid supplier TRN, reviewed'} tone="gold" />
+            <Stat label="Recoverable VAT" value={aed(summary.claimable.vat)} hint={pendingVat ? `Approved only · ${aed(pendingVat)} more waiting for review` : 'Approved, with a valid supplier TRN'} tone="gold" />
             <Stat label="At risk" value={aed(lost)} hint="VAT you may not be able to claim" tone={lost > 0 ? 'warn' : 'default'} />
           </section>
 

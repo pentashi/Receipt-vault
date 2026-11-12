@@ -15,6 +15,7 @@ ISSUE_LABELS = {
     'blocked_category': 'Category usually not recoverable',
     'no_vat': 'No VAT charged',
     'rejected': 'Rejected in review',
+    'pending_review': 'Waiting for review',
 }
 
 

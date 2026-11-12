@@ -168,6 +168,8 @@ class Receipt(db.Model):
             return 'missing_trn'
         if self.category in VAT_BLOCKED_CATEGORIES:
             return 'blocked_category'
+        if self.status != 'approved':
+            return 'pending_review'
         return None
 
     @property

@@ -35,6 +35,7 @@ const ISSUE_HELP: Record<string, string> = {
   blocked_category: 'VAT on entertainment is usually blocked under UAE VAT rules. Your accountant can confirm.',
   no_vat: 'No VAT on this receipt, so there is nothing to recover. It still counts as a business expense.',
   rejected: 'Rejected in review, so it is left out of the VAT return.',
+  pending_review: 'This VAT counts toward the return once an owner or accountant approves the receipt.',
 }
 
 function ReceiptDrawer({ receipt, role, categories, onClose, onChanged }: {
@@ -102,7 +103,7 @@ function ReceiptDrawer({ receipt, role, categories, onClose, onChanged }: {
 
         <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
           {receipt.vat_issue && (
-            <div className={`rounded-xl border p-3.5 text-sm ${receipt.vat_issue === 'no_vat' ? 'border-sand-200 bg-white text-night-600' : 'border-clay-100 bg-clay-50 text-clay-700'}`}>
+            <div className={`rounded-xl border p-3.5 text-sm ${receipt.vat_issue === 'no_vat' || receipt.vat_issue === 'pending_review' ? 'border-sand-200 bg-white text-night-600' : 'border-clay-100 bg-clay-50 text-clay-700'}`}>
               <div className="font-semibold">{ISSUE_LABELS[receipt.vat_issue]}</div>
               <div className="mt-0.5 opacity-90">{ISSUE_HELP[receipt.vat_issue]}</div>
             </div>

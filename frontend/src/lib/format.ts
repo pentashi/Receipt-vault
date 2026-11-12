@@ -29,6 +29,7 @@ export const ISSUE_LABELS: Record<string, string> = {
   blocked_category: 'Usually not recoverable',
   no_vat: 'No VAT on receipt',
   rejected: 'Rejected',
+  pending_review: 'Waiting for review',
 }
 
 export const formatTrn = (trn: string | null | undefined) => {

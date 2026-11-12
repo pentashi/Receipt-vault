@@ -35,7 +35,7 @@ export default function VatReturn({ role, onOpenReceipts }: { role: Role; onOpen
   }
 
   const missing = summary?.issues.find((i) => i.type === 'missing_trn')
-  const notRecoverable = summary ? Math.max(0, summary.totals.vat - summary.claimable.vat) : 0
+  const notRecoverable = summary ? Math.max(0, summary.totals.vat - summary.claimable.vat - (summary.issues.find((i) => i.type === 'pending_review')?.vat ?? 0)) : 0
   const checks = summary ? [
     { ok: summary.pending_review === 0, text: summary.pending_review === 0 ? 'Every receipt has been reviewed' : `${summary.pending_review} receipts still waiting for review`, action: () => onOpenReceipts({ status: 'pending' }) },
     { ok: !missing, text: missing ? `${missing.count} receipts missing a supplier TRN (${aed(missing.vat)} VAT)` : 'All receipts with VAT have a supplier TRN', action: () => onOpenReceipts({ issue: 'missing_trn' }) },
@@ -84,7 +84,7 @@ export default function VatReturn({ role, onOpenReceipts }: { role: Role; onOpen
                     <div className="mt-1 font-display text-3xl font-semibold text-gold-200">{aed(summary.vat201_box9.recoverable_vat)}</div>
                   </div>
                 </div>
-                <p className="mt-5 text-xs text-night-300">Based on {summary.claimable.count} receipts with a valid supplier TRN. A guide for your accountant, not a filed return.</p>
+                <p className="mt-5 text-xs text-night-300">Based on {summary.claimable.count} approved receipts with a valid supplier TRN. A guide for your accountant, not a filed return.</p>
               </div>
             </div>
             <div className="card p-6">
