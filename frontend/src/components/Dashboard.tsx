@@ -88,7 +88,7 @@ export default function Dashboard({ company, onNavigate }: { company: Company; o
           <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Stat label="Spend this quarter" value={aed(summary.totals.gross, 0)} hint={`${summary.totals.count} receipts incl. VAT`} />
             <Stat label="Input VAT paid" value={aed(summary.totals.vat)} hint="5% VAT on your purchases" />
-            <Stat label="Recoverable VAT" value={aed(summary.claimable.vat)} hint="Valid TRN, approved for claim" tone="gold" />
+            <Stat label="Recoverable VAT" value={aed(summary.claimable.vat)} hint={summary.pending_review ? `Valid TRN · ${summary.pending_review} still pending review` : 'Valid supplier TRN, reviewed'} tone="gold" />
             <Stat label="At risk" value={aed(lost)} hint="VAT you may not be able to claim" tone={lost > 0 ? 'warn' : 'default'} />
           </section>
 

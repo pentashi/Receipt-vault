@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import toast from 'react-hot-toast'
 import { AlertTriangle, Check, CheckCircle2, ExternalLink, FileText, Loader2, RotateCcw, Search, Trash2, X, XCircle } from 'lucide-react'
 import { deleteReceipt, fileUrl, getCategories, getReceipts, reviewReceipt, updateReceipt } from '../services/api'
@@ -84,7 +85,7 @@ function ReceiptDrawer({ receipt, role, categories, onClose, onChanged }: {
 
   const review = (status: ReviewStatus) => run(() => reviewReceipt(receipt.receipt_id, status, note), status === 'approved' ? 'Approved' : status === 'rejected' ? 'Rejected' : 'Moved back to pending')
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[100] flex justify-end bg-night-950/40 backdrop-blur-[2px]" onClick={onClose}>
       <div className="fade-in flex h-full w-full max-w-xl flex-col bg-sand-50 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start gap-3 border-b border-sand-200 bg-white px-6 py-5">
@@ -205,7 +206,7 @@ function ReceiptDrawer({ receipt, role, categories, onClose, onChanged }: {
         onConfirm={() => { setConfirm(false); run(() => deleteReceipt(receipt.receipt_id), 'Receipt deleted', true) }}
       />
     </div>
-  )
+  , document.body)
 }
 
 export default function ReceiptList({ role, initialFilter }: { role: Role; initialFilter: ReceiptFilter }) {

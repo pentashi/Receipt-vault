@@ -120,8 +120,9 @@ export default function Login({ onLogin }: { onLogin: (data: AuthResponse) => vo
                   <label className="label">Company name</label>
                   <div className="relative">
                     <Building2 className="absolute left-3.5 top-3 h-4 w-4 text-sand-400" />
-                    <input className="input pl-10" value={form.company_name} onChange={set('company_name')} placeholder="Falcon Trading LLC" required />
+                    <input className="input pl-10" value={form.company_name} onChange={set('company_name')} placeholder="Falcon Trading LLC" />
                   </div>
+                  <p className="mt-1 text-xs text-night-400">Joining your team's workspace? Leave this blank.</p>
                 </div>
                 <div>
                   <label className="label">Company TRN <span className="normal-case tracking-normal text-sand-400">(optional)</span></label>

@@ -64,7 +64,7 @@ export default function Team({ company, user, onCompaniesChanged }: { company: C
 
   return (
     <div className="grid gap-6 fade-in lg:grid-cols-[1fr_1.2fr]">
-      <div className="space-y-6">
+      <div className="min-w-0 space-y-6">
         <form onSubmit={saveProfile} className="card space-y-4 p-5">
           <div className="flex items-center gap-2"><Building2 className="h-5 w-5 text-gold-600" /><h3 className="font-display text-lg font-semibold">Company details</h3></div>
           <div>
@@ -102,7 +102,7 @@ export default function Team({ company, user, onCompaniesChanged }: { company: C
         </form>
       </div>
 
-      <div className="space-y-6">
+      <div className="min-w-0 space-y-6">
         <div className="card p-5">
           <h3 className="font-display text-lg font-semibold">People</h3>
           <div className="mt-3 divide-y divide-sand-200">
