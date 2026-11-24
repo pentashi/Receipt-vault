@@ -16,10 +16,14 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+// A 401 from these means the credentials were wrong, not that a session expired.
+const CREDENTIAL_ENDPOINTS = ['/auth/login', '/auth/register', '/auth/guest-login']
+
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response && (error.response.status === 401 || error.response.status === 422)) {
+    const isCredentialRequest = CREDENTIAL_ENDPOINTS.includes(error.config?.url)
+    if (!isCredentialRequest && error.response && (error.response.status === 401 || error.response.status === 422)) {
       localStorage.removeItem('token')
       localStorage.removeItem('user')
       localStorage.removeItem('companies')
